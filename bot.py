@@ -70,53 +70,31 @@ def main():
         .token(BOT_TOKEN)
         .build()
     )
-    # =====================================================
-    # ГЛОБАЛЬНЫЙ /start
-    # =====================================================
-    # Этот обработчик находится ПЕРЕД ConversationHandler.
-    # Поэтому /start будет работать в любом состоянии бота.
-    # =====================================================
-    # ОСНОВНОЙ CONVERSATION HANDLER
-    # =====================================================
-       conv = ConversationHandler(
+    conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
             CommandHandler("admin", admin_entry),
         ],
-
         allow_reentry=True,
-
         states={
-            # -------------------------
-            # СОГЛАСИЕ
-            # -------------------------
             CONSENT: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
                     consent_handler,
                 ),
             ],
-            # -------------------------
-            # ИМЯ
-            # -------------------------
             NAME: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
                     receive_name,
                 ),
             ],
-            # -------------------------
-            # ГЛАВНОЕ МЕНЮ
-            # -------------------------
             MENU: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
                     menu_handler,
                 ),
             ],
-            # -------------------------
-            # ПОДБОР ЗАПЧАСТИ
-            # -------------------------
             REQUEST_CAR: [
                 MessageHandler(
                     filters.Regex(r"^⬅️ Назад$"),
@@ -161,9 +139,6 @@ def main():
                     request_phone,
                 ),
             ],
-            # -------------------------
-            # МОИ ЗАЯВКИ
-            # -------------------------
             REQUEST_LIST: [
                 MessageHandler(
                     filters.Regex(r"^⬅️ Назад$"),
@@ -184,9 +159,6 @@ def main():
                     request_details,
                 ),
             ],
-            # -------------------------
-            # АВТОМОБИЛИ
-            # -------------------------
             CAR_MAKE: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
@@ -223,9 +195,6 @@ def main():
                     delete_car_handler,
                 ),
             ],
-            # -------------------------
-            # ПРОФИЛЬ
-            # -------------------------
             EDIT_NAME: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
@@ -242,9 +211,6 @@ def main():
                     edit_phone,
                 ),
             ],
-            # -------------------------
-            # АДМИНКА
-            # -------------------------
             ADMIN_MENU: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
