@@ -4,6 +4,7 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     ConversationHandler,
+    CallbackQueryHandler,
     filters,
 )
 from config import BOT_TOKEN
