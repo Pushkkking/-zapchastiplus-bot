@@ -75,16 +75,16 @@ def main():
     # =====================================================
     # Этот обработчик находится ПЕРЕД ConversationHandler.
     # Поэтому /start будет работать в любом состоянии бота.
-    app.add_handler(
-        CommandHandler("start", start)
-    )
     # =====================================================
     # ОСНОВНОЙ CONVERSATION HANDLER
     # =====================================================
-    conv = ConversationHandler(
-        entry_points=[
-            CommandHandler("admin", admin_entry),
-        ],
+   conv = ConversationHandler(
+    entry_points=[
+        CommandHandler("start", start),
+        CommandHandler("admin", admin_entry),
+    ],
+
+    allow_reentry=True,
         states={
             # -------------------------
             # СОГЛАСИЕ
