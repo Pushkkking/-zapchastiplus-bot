@@ -79,11 +79,11 @@ def main():
         allow_reentry=True,
         states={
             CONSENT: [
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    consent_handler,
-                ),
-            ],
+    CallbackQueryHandler(
+        consent_handler,
+        pattern=r"^consent_(yes|no)$",
+    ),
+],
             NAME: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
