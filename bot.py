@@ -78,13 +78,14 @@ def main():
     # =====================================================
     # ОСНОВНОЙ CONVERSATION HANDLER
     # =====================================================
-   conv = ConversationHandler(
-    entry_points=[
-        CommandHandler("start", start),
-        CommandHandler("admin", admin_entry),
-    ],
+       conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("admin", admin_entry),
+        ],
 
-    allow_reentry=True,
+        allow_reentry=True,
+
         states={
             # -------------------------
             # СОГЛАСИЕ
