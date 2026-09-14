@@ -70,9 +70,19 @@ def main():
         .token(BOT_TOKEN)
         .build()
     )
+    # =====================================================
+    # ГЛОБАЛЬНЫЙ /start
+    # =====================================================
+    # Этот обработчик находится ПЕРЕД ConversationHandler.
+    # Поэтому /start будет работать в любом состоянии бота.
+    app.add_handler(
+        CommandHandler("start", start)
+    )
+    # =====================================================
+    # ОСНОВНОЙ CONVERSATION HANDLER
+    # =====================================================
     conv = ConversationHandler(
         entry_points=[
-            CommandHandler("start", start),
             CommandHandler("admin", admin_entry),
         ],
         states={
@@ -107,7 +117,6 @@ def main():
             # ПОДБОР ЗАПЧАСТИ
             # -------------------------
             REQUEST_CAR: [
-                # "Назад" обрабатываем ПЕРВЫМ.
                 MessageHandler(
                     filters.Regex(r"^⬅️ Назад$"),
                     back_to_menu,
@@ -118,7 +127,6 @@ def main():
                 ),
             ],
             REQUEST_VIN: [
-                # Глобальный выход из подбора.
                 MessageHandler(
                     filters.Regex(r"^⬅️ Назад$"),
                     back_to_menu,
@@ -129,7 +137,6 @@ def main():
                 ),
             ],
             REQUEST_TEXT: [
-                # Глобальный выход из подбора.
                 MessageHandler(
                     filters.Regex(r"^⬅️ Назад$"),
                     back_to_menu,
@@ -140,7 +147,6 @@ def main():
                 ),
             ],
             REQUEST_PHONE: [
-                # Сначала "Назад".
                 MessageHandler(
                     filters.Regex(r"^⬅️ Назад$"),
                     back_to_menu,
@@ -168,6 +174,10 @@ def main():
                 ),
             ],
             REQUEST_DETAILS: [
+                MessageHandler(
+                    filters.Regex(r"^⬅️ К заявкам$"),
+                    request_details,
+                ),
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
                     request_details,
@@ -259,10 +269,6 @@ def main():
                 ),
             ],
         },
-        # ВАЖНО:
-        # /start больше не находится в fallbacks.
-        # Это исключает лишний обработчик /start
-        # внутри активного ConversationHandler.
         fallbacks=[
             CommandHandler("cancel", cancel),
         ],
