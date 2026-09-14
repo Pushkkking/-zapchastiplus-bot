@@ -268,24 +268,21 @@ async def add_car_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_car"] = {}
     await update.message.reply_text(
         "🚗 Добавляем автомобиль.\n\n"
-        "Напишите марку автомобиля.\n\n"
-        "Например: Honda",
+        "Напишите марку автомобиля.",
         reply_markup=cancel_keyboard(),
     )
     return CAR_MAKE
 async def get_car_make(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_car"]["make"] = update.message.text.strip()
     await update.message.reply_text(
-        "Теперь напишите модель.\n\n"
-        ,
+        "Теперь напишите модель.",
         reply_markup=cancel_keyboard(),
     )
     return CAR_MODEL
 async def get_car_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_car"]["model"] = update.message.text.strip()
     await update.message.reply_text(
-        "📅 Напишите год выпуска.\n\n"
-        ,
+        "📅 Напишите год выпуска.",
         reply_markup=cancel_keyboard(),
     )
     return CAR_YEAR
