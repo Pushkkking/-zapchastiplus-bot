@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+import os
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -16,7 +17,7 @@ from telegram.ext import (
 # =========================
 # НАСТРОЙКИ
 # =========================
-BOT_TOKEN = "ВСТАВЬ_СЮДА_НОВЫЙ_ТОКЕН"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = 440464150
 DB_NAME = "zapchasti_plus.db"
 logging.basicConfig(
@@ -69,9 +70,11 @@ def init_db():
             plate TEXT
         )
     """)
-    # Добавляем отдельное поле для имени клиента
+    # Отдельное имя клиента
     try:
-        cursor.execute("ALTER TABLE users ADD COLUMN name TEXT")
+        cursor.execute(
+            "ALTER TABLE users ADD COLUMN name TEXT"
+        )
     except sqlite3.OperationalError:
         pass
     conn.commit()
@@ -85,11 +88,14 @@ def save_user(telegram_user):
     )
     exists = cursor.fetchone()
     if exists:
+        # Обновляем только технические данные Telegram.
+        # Имя клиента НЕ перезаписываем.
         cursor.execute("""
             UPDATE users
-            SET username = ?
+            SET full_name = ?, username = ?
             WHERE telegram_id = ?
         """, (
+            telegram_user.full_name,
             telegram_user.username,
             telegram_user.id,
         ))
@@ -239,7 +245,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = get_customer_name(user.id)
     if not name:
         await update.message.reply_text(
-            "Здравствуйте!\n\n"
+            "Здравствуйте! 👋\n\n"
             "Как я могу к вам обращаться?\n\n"
             "Напишите ваше имя:"
         )
@@ -251,7 +257,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MENU
 # =========================
-# СОХРАНЕНИЕ ИМЕНИ
+# ПОЛУЧЕНИЕ ИМЕНИ
 # =========================
 async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
@@ -271,7 +277,7 @@ async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(
         f"Очень приятно, {name}! 👋\n\n"
-        "Теперь вы можете выбрать нужное действие:",
+        "Теперь можно выбрать нужное действие:",
         reply_markup=main_menu(),
     )
     return MENU
@@ -297,15 +303,20 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     resize_keyboard=True,
                 ),
             )
-            return MENU
-        await update.message.reply_text(
-            "У вас пока не сохранён номер телефона.\n\n"
-            "Вы можете добавить его при оформлении заявки.",
-            reply_markup=main_menu(),
-        )
+        else:
+            await update.message.reply_text(
+                "Номер телефона пока не указан.",
+                reply_markup=main_menu(),
+            )
         return MENU
     if text == "👤 Мои данные":
         return await my_data(update, context)
+    if text == "📱 Изменить телефон":
+        await update.message.reply_text(
+            "Введите новый номер телефона:",
+            reply_markup=back_menu(),
+        )
+        return EDIT_PHONE
     if text == "⬅️ Назад":
         name = get_customer_name(update.effective_user.id)
         await update.message.reply_text(
@@ -313,12 +324,12 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=main_menu(),
         )
         return MENU
-    if text == "📱 Изменить телефон":
-        await update.message.reply_text(
-            "Введите новый номер телефона:",
-            reply_markup=back_menu(),
-        )
-        return EDIT_PHONE
+    if text == "➕ Добавить автомобиль":
+        return await add_car_start(update, context)
+    if text == "🗑 Удалить автомобиль":
+        return await delete_car_start(update, context)
+    if text == "✏️ Изменить имя":
+        return await edit_name_start(update, context)
     return MENU
 # =========================
 # МОИ ДАННЫЕ
@@ -327,18 +338,16 @@ async def my_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     name = get_customer_name(user_id)
     phone = get_phone(user_id)
-    phone_text = phone if phone else "не указан"
-    keyboard = [
-        ["✏️ Изменить имя"],
-        ["📱 Изменить телефон"],
-        ["⬅️ Назад"],
-    ]
     await update.message.reply_text(
-        "👤 Ваши данные\n\n"
+        "👤 Мои данные\n\n"
         f"Имя: {name or 'не указано'}\n"
-        f"Телефон: {phone_text}",
+        f"Телефон: {phone or 'не указан'}",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard,
+            [
+                ["✏️ Изменить имя"],
+                ["📱 Изменить телефон"],
+                ["⬅️ Назад"],
+            ],
             resize_keyboard=True,
         ),
     )
@@ -418,7 +427,7 @@ async def start_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return VIN
 # =========================
-# ВЫБОР СОХРАНЁННОГО АВТО
+# ВЫБОР АВТО
 # =========================
 async def car_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -565,7 +574,7 @@ async def receive_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_request_to_owner(update, context, phone):
     user = update.effective_user
     user_id = user.id
-    name = get_customer_name(user_id)
+    customer_name = get_customer_name(user_id)
     car = context.user_data.get("car", {})
     request = context.user_data.get("request", "")
     make = car.get("make", "")
@@ -585,10 +594,14 @@ async def send_request_to_owner(update, context, phone):
     if plate:
         vehicle_lines.append(f"Госномер: {plate}")
     vehicle_text = "\n".join(vehicle_lines)
-    username = f"@{user.username}" if user.username else "не указан"
+    username = (
+        f"@{user.username}"
+        if user.username
+        else "не указан"
+    )
     message = (
         "🔔 НОВАЯ ЗАЯВКА\n\n"
-        f"👤 Клиент: {name or 'не указано'}\n"
+        f"👤 Клиент: {customer_name or 'не указано'}\n"
         f"📱 Телефон: {phone}\n"
         f"💬 Telegram: {username}\n"
         f"🆔 Telegram ID: {user_id}\n\n"
@@ -607,14 +620,13 @@ async def send_request_to_owner(update, context, phone):
 async def my_cars(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cars = get_cars(update.effective_user.id)
     if not cars:
-        keyboard = [
-            ["➕ Добавить автомобиль"],
-            ["⬅️ Назад"],
-        ]
         await update.message.reply_text(
             "У вас пока нет сохранённых автомобилей.",
             reply_markup=ReplyKeyboardMarkup(
-                keyboard,
+                [
+                    ["➕ Добавить автомобиль"],
+                    ["⬅️ Назад"],
+                ],
                 resize_keyboard=True,
             ),
         )
@@ -791,6 +803,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 def main():
     init_db()
+    if not BOT_TOKEN:
+        raise ValueError(
+            "Не найдена переменная окружения BOT_TOKEN"
+        )
     application = (
         Application.builder()
         .token(BOT_TOKEN)
@@ -809,41 +825,9 @@ def main():
             ],
             MENU: [
                 MessageHandler(
-                    filters.Regex("^🔧 Подобрать запчасть$"),
-                    start_request,
-                ),
-                MessageHandler(
-                    filters.Regex("^🚗 Мои автомобили$"),
-                    my_cars,
-                ),
-                MessageHandler(
-                    filters.Regex("^📱 Мой телефон$"),
+                    filters.TEXT & ~filters.COMMAND,
                     menu_handler,
-                ),
-                MessageHandler(
-                    filters.Regex("^👤 Мои данные$"),
-                    my_data,
-                ),
-                MessageHandler(
-                    filters.Regex("^✏️ Изменить имя$"),
-                    edit_name_start,
-                ),
-                MessageHandler(
-                    filters.Regex("^📱 Изменить телефон$"),
-                    menu_handler,
-                ),
-                MessageHandler(
-                    filters.Regex("^➕ Добавить автомобиль$"),
-                    add_car_start,
-                ),
-                MessageHandler(
-                    filters.Regex("^🗑 Удалить автомобиль$"),
-                    delete_car_start,
-                ),
-                MessageHandler(
-                    filters.Regex("^⬅️ Назад$"),
-                    menu_handler,
-                ),
+                )
             ],
             CAR_SELECT: [
                 MessageHandler(
