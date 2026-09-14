@@ -419,7 +419,8 @@ async def back_to_menu(
         "Чем могу помочь?",
         reply_markup=main_menu(),
     )
-    return MENUfrom telegram import Update, ReplyKeyboardMarkup
+    return MENU
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 from database.cars import get_cars
 from database.users import get_name, get_phone, get_username, save_phone
