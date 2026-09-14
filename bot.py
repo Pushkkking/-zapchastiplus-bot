@@ -277,7 +277,7 @@ async def get_car_make(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_car"]["make"] = update.message.text.strip()
     await update.message.reply_text(
         "Теперь напишите модель.\n\n"
-        "Например: Accord",
+        ,
         reply_markup=cancel_keyboard(),
     )
     return CAR_MODEL
@@ -285,7 +285,7 @@ async def get_car_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_car"]["model"] = update.message.text.strip()
     await update.message.reply_text(
         "📅 Напишите год выпуска.\n\n"
-        "Например: 2003",
+        ,
         reply_markup=cancel_keyboard(),
     )
     return CAR_YEAR
@@ -294,7 +294,7 @@ async def get_car_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not year.isdigit() or len(year) != 4:
         await update.message.reply_text(
             "⚠️ Введите год четырьмя цифрами.\n\n"
-            "Например: 2003"
+            
         )
         return CAR_YEAR
     context.user_data["new_car"]["year"] = year
