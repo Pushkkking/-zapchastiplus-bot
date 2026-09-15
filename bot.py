@@ -13,7 +13,7 @@ from config import BOT_TOKEN
 from database.db import init_db
 from handlers.start import start, receive_name, consent_handler, cancel
 from handlers.menu import menu_handler
-from handlers.profile import edit_name, edit_phone
+from handlers.profile import edit_name, edit_phone, start_edit_data
 from handlers.cars import (
     show_cars, add_car_start, car_make, car_model, car_year,
     car_vin, car_plate, delete_car_start, delete_car_handler, car_back,
@@ -124,8 +124,7 @@ def main():
             PROFILE_MENU: [
                 MessageHandler(filters.Regex(r'^📊 Моя статистика$'), show_customer_stats),
                 MessageHandler(filters.Regex(r'^💳 Моя карта$'), show_customer_card),
-                MessageHandler(filters.Regex(r'^✏️ Изменить имя$'), edit_name),
-                MessageHandler(filters.Regex(r'^📱 Изменить телефон$'), edit_phone),
+                MessageHandler(filters.Regex(r'^✏️ Изменить данные$'), start_edit_data),
                 MessageHandler(filters.Regex(r'^⬅️ Назад$'), back_to_menu),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler),
             ],
