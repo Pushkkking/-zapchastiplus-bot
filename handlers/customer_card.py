@@ -10,7 +10,6 @@ from config import BOT_USERNAME
 from database.users import get_card_token, get_card_number
 from database.cashback import get_balance, get_order_spent
 from database.loyalty import get_level
-from keyboards.keyboards import profile_menu
 from states import PROFILE_MENU
 
 
@@ -70,5 +69,4 @@ async def show_customer_card(update: Update, context: ContextTypes.DEFAULT_TYPE)
               'Код карты уникальный и не меняется при обновлении бота.'
         ),
     )
-    await update.message.reply_text('Меню «Мои данные»:', reply_markup=profile_menu())
     return PROFILE_MENU
