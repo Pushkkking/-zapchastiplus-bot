@@ -20,9 +20,9 @@ from handlers.cars import (
 )
 from handlers.requests import (
     start_request, request_car, request_vin, request_text,
-    request_phone, show_requests, request_list, request_details,
-    back_to_menu,
+    request_phone, back_to_menu,
 )
+from handlers.customer_cases import show_cases, case_list, case_details
 from handlers.orders import order_create_handler, order_decline_handler
 from handlers.customer_orders import order_list, order_details
 from handlers.customer_chat import start_customer_reply, receive_customer_message
@@ -82,8 +82,7 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, request_phone),
             ],
             REQUEST_LIST: [
-                MessageHandler(filters.Regex(r'^⬅️ Назад$'), back_to_menu),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, request_list),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, case_list),
             ],
             ORDER_LIST: [
                 MessageHandler(filters.Regex(r'^⬅️ Назад$'), order_list),
@@ -95,8 +94,7 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, order_details),
             ],
             REQUEST_DETAILS: [
-                MessageHandler(filters.Regex(r'^⬅️ К заявкам$'), request_details),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, request_details),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, case_details),
             ],
             CAR_MAKE: [
                 MessageHandler(filters.Regex(r'^(?:⬅️\s*)?Назад$'), car_back),

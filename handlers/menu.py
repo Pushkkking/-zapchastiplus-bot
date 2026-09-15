@@ -1,26 +1,23 @@
 from database.users import get_name,get_phone
-from keyboards.keyboards import main_menu,phone_menu,back_keyboard
+from keyboards.keyboards import main_menu,back_keyboard
 from states import MENU,EDIT_NAME,EDIT_PHONE
 
 async def menu_handler(update,context):
     text=update.message.text
     if text=='🔧 Подобрать запчасть':
         from handlers.requests import start_request; return await start_request(update,context)
-    if text=='📋 Мои заявки':
-        from handlers.requests import show_requests; return await show_requests(update,context)
-    if text=='🛒 Мои заказы':
-        from handlers.customer_orders import show_orders; return await show_orders(update,context)
+    if text=='📋 Мои обращения':
+        from handlers.customer_cases import show_cases; return await show_cases(update,context)
     if text=='💬 Связаться с Запчасти+':
         from handlers.customer_chat import show_chat; return await show_chat(update,context)
     if text=='🚗 Мои автомобили':
         from handlers.cars import show_cars; return await show_cars(update,context)
-    if text=='📱 Мой телефон':
-        phone=get_phone(update.effective_user.id)
-        await update.message.reply_text(f'📱 Ваш телефон:\n{phone}' if phone else '📱 Номер телефона пока не указан.',reply_markup=phone_menu()); return MENU
     if text=='💬 Написать сообщение':
         from handlers.customer_chat import start_customer_message; return await start_customer_message(update,context)
     if text=='📖 История переписки':
         from handlers.customer_chat import show_chat_history; return await show_chat_history(update,context)
+    if text=='📊 Моя статистика':
+        from handlers.customer_stats import show_customer_stats; return await show_customer_stats(update,context)
     if text=='👤 Мои данные':
         from handlers.profile import show_my_data; return await show_my_data(update,context)
     if text=='✏️ Изменить имя':
