@@ -97,7 +97,20 @@ def init_db():
         telegram_id INTEGER NOT NULL,
         status TEXT NOT NULL DEFAULT '🆕 Новый',
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        offer_text TEXT
+    )''')
+
+    cur.execute('''CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER NOT NULL,
+        sender TEXT NOT NULL,
+        text TEXT NOT NULL,
+        message_type TEXT NOT NULL DEFAULT 'text',
+        file_id TEXT,
+        request_id INTEGER,
+        order_id INTEGER,
+        created_at TEXT NOT NULL
     )''')
 
     # Миграции существующей БД.
@@ -108,6 +121,8 @@ def init_db():
     _add_column(cur, 'requests', 'updated_at', "TEXT NOT NULL DEFAULT ''")
     _add_column(cur, 'requests', 'offer_text', 'TEXT')
     _add_column(cur, 'orders', 'offer_text', 'TEXT')
+    _add_column(cur, 'messages', 'message_type', "TEXT NOT NULL DEFAULT 'text'")
+    _add_column(cur, 'messages', 'file_id', 'TEXT')
 
     conn.commit()
     conn.close()

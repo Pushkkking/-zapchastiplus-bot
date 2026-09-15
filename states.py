@@ -22,4 +22,5 @@
     ADMIN_MESSAGE,
     ORDER_LIST,
     ORDER_DETAILS,
-) = range(23)
+    CUSTOMER_MESSAGE,
+) = range(24)

@@ -10,8 +10,11 @@ from states import MENU, REQUEST_CAR, REQUEST_VIN, REQUEST_TEXT, REQUEST_PHONE, 
 
 
 def car_title(car):
-    _, make, model, year, _, _ = car
-    return f'🚗 {make} {model}' + (f' {year}' if year else '')
+    _, make, model, year, _, plate = car
+    label = f'🚗 {make} {model}'.strip()
+    if plate:
+        return f'{label} — {plate}'
+    return f'{label} — номер не указан'
 
 
 async def start_request(update, context):
@@ -140,7 +143,7 @@ async def save_and_send(update, context, phone):
     )
     lines = [
         f'{k}: {car[v]}'
-        for k, v in [('Марка', 'make'), ('Модель', 'model'), ('Год', 'year'), ('VIN', 'vin'), ('Госномер', 'plate')]
+        for k, v in [('Марка', 'make'), ('Модель', 'model'), ('Год', 'year'), ('VIN / номер кузова', 'vin'), ('Госномер', 'plate')]
         if car.get(v)
     ]
     vehicle = '\n'.join(lines) or 'данные не указаны'
@@ -198,7 +201,7 @@ async def request_list(update, context):
 async def send_request_details(update, row, admin=False):
     rid, uid, make, model, year, vin, plate, text, phone, status, created, updated = row
     lines = []
-    for label, val in [('Марка', make), ('Модель', model), ('Год', year), ('VIN', vin), ('Госномер', plate)]:
+    for label, val in [('Марка', make), ('Модель', model), ('Год', year), ('VIN / номер кузова', vin), ('Госномер', plate)]:
         if val:
             lines.append(f'{label}: {val}')
     vehicle = '\n'.join(lines) or 'не указан'

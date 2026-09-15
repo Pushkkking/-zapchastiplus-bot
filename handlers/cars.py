@@ -5,7 +5,18 @@ from keyboards.keyboards import main_menu,back_keyboard
 from states import MENU,CAR_MAKE,CAR_MODEL,CAR_YEAR,CAR_VIN,CAR_PLATE,DELETE_CAR
 
 def title(car):
-    _,make,model,year,_,_=car; return f'🚗 {make} {model}' + (f' {year}' if year else '')
+    _, make, model, year, _, plate = car
+    label = f'🚗 {make} {model}'.strip()
+    if plate:
+        return f'{label} — {plate}'
+    return f'{label} — номер не указан'
+
+async def car_back(update,context):
+    # Явный выход из любого шага добавления автомобиля.
+    # Очищаем незавершённые данные, чтобы старый сценарий больше не продолжался.
+    context.user_data.pop('new_car', None)
+    await update.message.reply_text('Добавление автомобиля отменено.', reply_markup=ReplyKeyboardMarkup([['➕ Добавить автомобиль'],['⬅️ Назад']], resize_keyboard=True))
+    return await show_cars(update,context)
 
 async def show_cars(update,context):
     cars=get_cars(update.effective_user.id)
@@ -29,11 +40,14 @@ async def car_model(update,context):
 async def car_year(update,context):
     t=update.message.text.strip()
     if t=='⬅️ Назад': return await show_cars(update,context)
-    context.user_data['new_car']['year']='' if t=='Пропустить' else t; await update.message.reply_text('Введите VIN автомобиля.\n\nVIN состоит из 17 символов.',reply_markup=back_keyboard()); return CAR_VIN
+    context.user_data['new_car']['year']='' if t=='Пропустить' else t; await update.message.reply_text('Введите VIN или номер кузова автомобиля.\n\nЕсли VIN/номер кузова неизвестен — нажмите «Пропустить». Для японских автомобилей можно указать номер кузова, даже если он короче 17 символов.',reply_markup=ReplyKeyboardMarkup([['Пропустить'],['⬅️ Назад']],resize_keyboard=True)); return CAR_VIN
 async def car_vin(update,context):
     t=update.message.text.strip().upper()
     if t=='⬅️ Назад': return await show_cars(update,context)
-    if len(t)!=17: await update.message.reply_text('VIN должен состоять ровно из 17 символов.'); return CAR_VIN
+    if t=='Пропустить': t=''
+    elif len(t)<3 or len(t)>30 or not all(ch.isalnum() or ch in '-_ ' for ch in t):
+        await update.message.reply_text('Введите корректный VIN или номер кузова (от 3 до 30 символов) либо нажмите «Пропустить».')
+        return CAR_VIN
     context.user_data['new_car']['vin']=t; await update.message.reply_text('Введите госномер или нажмите «Пропустить»:',reply_markup=ReplyKeyboardMarkup([['Пропустить'],['⬅️ Назад']],resize_keyboard=True)); return CAR_PLATE
 async def car_plate(update,context):
     t=update.message.text.strip()

@@ -4,8 +4,9 @@ from telegram.ext import ContextTypes
 from config import OWNER_ID
 from database.requests import get_all_requests, get_request, update_status, get_stats, set_offer, get_offer
 from database.orders import get_all_orders, get_order, update_order_status, get_order_stats
-from database.users import get_name, get_phone, get_username
-from keyboards.keyboards import admin_menu, main_menu, admin_order_actions
+from database.users import get_name, get_phone, get_username, get_all_users, get_user_summary
+from database.messages import create_message, get_user_messages, get_message_threads
+from keyboards.keyboards import admin_menu, main_menu, admin_order_actions, admin_message_thread_actions
 from states import ADMIN_MENU, ADMIN_REQUEST_LIST, ADMIN_REQUEST_DETAILS, ADMIN_MESSAGE, MENU
 
 
@@ -62,6 +63,10 @@ async def admin_menu_handler(update, context):
         return await admin_list(update, context, None)
     if text == '🛒 Заказы':
         return await admin_order_list(update, context)
+    if text == '💬 Сообщения':
+        return await admin_message_threads(update, context)
+    if text == '👥 Клиенты':
+        return await admin_clients(update, context)
     if text == '📊 Статистика':
         total, new, selecting, offer, done, cancelled = get_stats()
         ototal, onew, owork, oready, odone, ocancelled = get_order_stats()
@@ -147,7 +152,7 @@ def admin_request_keyboard():
 async def send_admin_details(update, row):
     request_id, user_id, make, model, year, vin, plate, request_text, phone, status, created, updated = row
     vehicle_lines = []
-    for label, value in [('Марка', make), ('Модель', model), ('Год', year), ('VIN', vin), ('Госномер', plate)]:
+    for label, value in [('Марка', make), ('Модель', model), ('Год', year), ('VIN / номер кузова', vin), ('Госномер', plate)]:
         if value:
             vehicle_lines.append(f'{label}: {value}')
     vehicle = '\n'.join(vehicle_lines) if vehicle_lines else 'не указан'
@@ -227,6 +232,124 @@ async def admin_details(update, context):
     return ADMIN_REQUEST_DETAILS
 
 
+# ========================= КЛИЕНТЫ =========================
+
+async def admin_clients(update, context):
+    if not require_owner(update):
+        return MENU
+    rows = get_all_users(100)
+    context.user_data['admin_client_ids'] = [r[0] for r in rows]
+    context.user_data.pop('admin_request_ids', None)
+    context.user_data.pop('admin_order_ids', None)
+    context.user_data.pop('admin_message_thread_ids', None)
+    if not rows:
+        await update.message.reply_text('👥 Клиентов пока нет.', reply_markup=admin_menu())
+        return ADMIN_MENU
+    keyboard=[]
+    for uid,name,phone,username,consent in rows:
+        display=name or (f'@{username}' if username else 'Клиент')
+        keyboard.append([f'👤 {display} — {uid}'])
+    keyboard.append(['⬅️ В админ-панель'])
+    await update.message.reply_text('👥 КЛИЕНТЫ\n\nВыберите клиента:', reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+    return ADMIN_REQUEST_LIST
+
+async def admin_client_select(update, context):
+    if not require_owner(update):
+        return MENU
+    text=update.message.text.strip()
+    if text == '⬅️ В админ-панель':
+        return await admin_entry(update, context)
+    try:
+        uid=int(text.rsplit('—',1)[1].strip())
+    except (ValueError,IndexError):
+        return ADMIN_REQUEST_LIST
+    if uid not in context.user_data.get('admin_client_ids',[]):
+        return ADMIN_REQUEST_LIST
+    context.user_data['admin_client_id']=uid
+    user,cars,requests_count,orders_count=get_user_summary(uid)
+    name=user[1] or 'не указано'; phone=user[2] or 'не указан'; username=f'@{user[3]}' if user[3] else 'не указан'
+    from database.cars import get_cars
+    cars_rows=get_cars(uid)
+    car_lines=[]
+    for c in cars_rows:
+        _,make,model,year,vin,plate=c
+        extra=' '.join(x for x in [str(year) if year else '', f'({vin})' if vin else '', plate or ''] if x)
+        car_lines.append(f'🚗 {make} {model}' + (f' {extra}' if extra else ''))
+    msg=(f'👤 КЛИЕНТ\n\nИмя: {name}\n📱 Телефон: {phone}\n💬 Telegram: {username}\n\n'
+         f'🚗 Автомобилей: {cars}\n📋 Заявок: {requests_count}\n🛒 Заказов: {orders_count}')
+    if car_lines: msg+='\n\nАВТОМОБИЛИ\n'+'\n'.join(car_lines)
+    await update.message.reply_text(msg, reply_markup=ReplyKeyboardMarkup([['💬 Написать клиенту'],['⬅️ К клиентам']],resize_keyboard=True))
+    return ADMIN_REQUEST_DETAILS
+
+
+# ========================= СООБЩЕНИЯ =========================
+
+async def admin_message_threads(update, context):
+    if not require_owner(update):
+        return MENU
+    rows = get_message_threads()
+    context.user_data['admin_message_thread_ids'] = [r[0] for r in rows]
+    context.user_data.pop('admin_request_ids', None)
+    context.user_data.pop('admin_order_ids', None)
+    if not rows:
+        await update.message.reply_text('💬 Сообщений пока нет.', reply_markup=admin_menu())
+        return ADMIN_MENU
+    keyboard = []
+    for telegram_id, text, sender, created, request_id, order_id in rows:
+        name = get_name(telegram_id) or 'Клиент'
+        marker = '🔴' if sender == 'customer' else '💬'
+        context_text = f' · заказ №{order_id}' if order_id else (f' · заявка №{request_id}' if request_id else '')
+        preview = text.replace('\n', ' ')[:45]
+        keyboard.append([f'{marker} {name}{context_text} — {preview}'])
+    keyboard.append(['⬅️ В админ-панель'])
+    await update.message.reply_text('💬 СООБЩЕНИЯ КЛИЕНТОВ:\n\nВыберите переписку:', reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+    return ADMIN_REQUEST_LIST
+
+
+async def admin_message_thread_select(update, context):
+    if not require_owner(update):
+        return MENU
+    text = update.message.text.strip()
+    if text == '⬅️ В админ-панель':
+        return await admin_entry(update, context)
+    rows = get_message_threads()
+    for telegram_id, last_text, sender, created, request_id, order_id in rows:
+        name = get_name(telegram_id) or 'Клиент'
+        marker = '🔴' if sender == 'customer' else '💬'
+        context_text = f' · заказ №{order_id}' if order_id else (f' · заявка №{request_id}' if request_id else '')
+        preview = last_text.replace('\n', ' ')[:45]
+        expected = f'{marker} {name}{context_text} — {preview}'
+        if text == expected:
+            context.user_data['admin_message_thread_id'] = telegram_id
+            context.user_data['admin_message_target'] = 'thread'
+            await send_admin_thread_details(update, context, telegram_id)
+            return ADMIN_REQUEST_DETAILS
+    return ADMIN_REQUEST_LIST
+
+
+def _thread_history_text(telegram_id, limit=20):
+    rows = get_user_messages(telegram_id, limit)
+    if not rows:
+        return 'Переписка пуста.'
+    parts = []
+    for _, sender, text, message_type, file_id, request_id, order_id, created in rows:
+        who = 'Клиент' if sender == 'customer' else 'Запчасти+'
+        if message_type == 'photo': text = '📷 ' + text
+        elif message_type == 'document': text = '📎 ' + text
+        context_text = f' · заказ №{order_id}' if order_id else (f' · заявка №{request_id}' if request_id else '')
+        parts.append(f'[{created}] {who}{context_text}:\n{text}')
+    return '\n\n'.join(parts)
+
+
+async def send_admin_thread_details(update, context, telegram_id):
+    name = get_name(telegram_id) or 'Клиент'
+    phone = get_phone(telegram_id) or 'не указан'
+    message = f'💬 ПЕРЕПИСКА С КЛИЕНТОМ\n\n👤 Клиент: {name}\n📱 Телефон: {phone}\n\n{_thread_history_text(telegram_id)}'
+    if len(message) > 3900:
+        message = '…\n\n' + message[-3900:]
+    await update.message.reply_text(message, reply_markup=admin_message_thread_actions())
+
+
 # ========================= ЗАКАЗЫ =========================
 
 async def admin_order_list(update, context):
@@ -253,6 +376,10 @@ async def admin_order_list(update, context):
 
 
 async def admin_request_or_order_list(update, context):
+    if context.user_data.get('admin_message_thread_ids') is not None:
+        return await admin_message_thread_select(update, context)
+    if context.user_data.get('admin_client_ids') is not None:
+        return await admin_client_select(update, context)
     if context.user_data.get('admin_order_ids') is not None:
         return await admin_order_select(update, context)
     return await admin_request_list(update, context)
@@ -283,7 +410,7 @@ async def admin_order_select(update, context):
 async def send_admin_order_details(update, row):
     order_id, request_id, user_id, status, created, updated, offer_text, make, model, year, vin, plate, request_text, phone = row
     vehicle_lines = []
-    for label, value in [('Марка', make), ('Модель', model), ('Год', year), ('VIN', vin), ('Госномер', plate)]:
+    for label, value in [('Марка', make), ('Модель', model), ('Год', year), ('VIN / номер кузова', vin), ('Госномер', plate)]:
         if value:
             vehicle_lines.append(f'{label}: {value}')
     vehicle = '\n'.join(vehicle_lines) if vehicle_lines else 'не указан'
@@ -350,10 +477,37 @@ async def admin_order_details(update, context):
 
 
 async def admin_request_or_order_details(update, context):
+    if context.user_data.get('admin_client_id') is not None and context.user_data.get('admin_message_target') != 'client':
+        text = update.message.text.strip()
+        if text == '⬅️ К клиентам':
+            return await admin_clients(update, context)
+        if text == '💬 Написать клиенту':
+            context.user_data['admin_message_target'] = 'client'
+            await update.message.reply_text('💬 Введите сообщение клиенту:\n\nДля отмены нажмите /cancel')
+            return ADMIN_MESSAGE
+        return ADMIN_REQUEST_DETAILS
     target = context.user_data.get('admin_message_target')
+    if target == 'thread':
+        return await admin_thread_details(update, context)
     if target == 'order':
         return await admin_order_details(update, context)
     return await admin_details(update, context)
+
+
+async def admin_thread_details(update, context):
+    if not require_owner(update):
+        return MENU
+    text = update.message.text.strip()
+    telegram_id = context.user_data.get('admin_message_thread_id')
+    if not telegram_id:
+        return await admin_entry(update, context)
+    if text == '⬅️ К сообщениям':
+        return await admin_message_threads(update, context)
+    if text == '💬 Ответить':
+        context.user_data['admin_message_target'] = 'thread'
+        await update.message.reply_text('💬 Введите сообщение клиенту:\n\nДля отмены нажмите /cancel')
+        return ADMIN_MESSAGE
+    return ADMIN_REQUEST_DETAILS
 
 
 async def admin_message(update, context):
@@ -401,7 +555,13 @@ async def admin_message(update, context):
         await send_admin_details(update, row)
         return ADMIN_REQUEST_DETAILS
 
-    if target == 'order':
+    if target == 'thread':
+        chat_id = context.user_data.get('admin_message_thread_id')
+        row = None
+    elif target == 'client':
+        chat_id = context.user_data.get('admin_client_id')
+        row = None
+    elif target == 'order':
         order_id = context.user_data.get('admin_order_id')
         row = get_order(order_id) if order_id else None
         if not row:
@@ -414,10 +574,25 @@ async def admin_message(update, context):
             return await admin_entry(update, context)
         chat_id = row[1]
 
+    request_id_for_message = None
+    order_id_for_message = None
+    if target == 'thread' or target == 'client':
+        order_id_for_message = None
+        request_id_for_message = None
+    elif target == 'order':
+        order_id_for_message = context.user_data.get('admin_order_id')
+        request_id_for_message = row[1] if row else None
+    else:
+        request_id_for_message = context.user_data.get('admin_request_id')
+
+    create_message(chat_id, 'admin', text, request_id_for_message, order_id_for_message)
+
     try:
+        from keyboards.keyboards import customer_reply_keyboard
         await context.bot.send_message(
             chat_id=chat_id,
             text=f'💬 Сообщение от «Запчасти+»:\n\n{text}',
+            reply_markup=customer_reply_keyboard(request_id_for_message, order_id_for_message),
         )
     except Exception:
         await update.message.reply_text('❌ Не удалось отправить сообщение клиенту.')
@@ -425,7 +600,12 @@ async def admin_message(update, context):
 
     await update.message.reply_text('Сообщение отправлено клиенту ✅')
 
-    if target == 'order':
+    if target == 'thread':
+        await send_admin_thread_details(update, context, context.user_data['admin_message_thread_id'])
+    elif target == 'client':
+        context.user_data.pop('admin_message_target', None)
+        await admin_client_select(update, context)
+    elif target == 'order':
         row = get_order(context.user_data['admin_order_id'])
         await send_admin_order_details(update, row)
     else:

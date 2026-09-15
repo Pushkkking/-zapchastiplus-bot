@@ -47,3 +47,18 @@ def has_consent(user_id):
 def save_consent(user_id):
     conn=db(); conn.execute('UPDATE users SET consent_given=1, consent_at=? WHERE telegram_id=?',
                             (datetime.now().isoformat(timespec='seconds'), user_id)); conn.commit(); conn.close()
+
+
+def get_all_users(limit=100):
+    conn=db(); cur=conn.cursor()
+    cur.execute('''SELECT telegram_id,name,phone,username,consent_given FROM users ORDER BY telegram_id DESC LIMIT ?''', (limit,))
+    rows=cur.fetchall(); conn.close(); return rows
+
+
+def get_user_summary(user_id):
+    conn=db(); cur=conn.cursor()
+    cur.execute('SELECT telegram_id,name,phone,username,consent_given FROM users WHERE telegram_id=?', (user_id,)); user=cur.fetchone()
+    cur.execute('SELECT COUNT(*) FROM cars WHERE telegram_id=?', (user_id,)); cars=cur.fetchone()[0]
+    cur.execute('SELECT COUNT(*) FROM requests WHERE telegram_id=?', (user_id,)); requests=cur.fetchone()[0]
+    cur.execute('SELECT COUNT(*) FROM orders WHERE telegram_id=?', (user_id,)); orders=cur.fetchone()[0]
+    conn.close(); return user,cars,requests,orders

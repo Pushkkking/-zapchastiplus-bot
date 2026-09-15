@@ -10,8 +10,11 @@ from database.users import get_name, get_phone
 
 
 def car_title(row):
-    make, model, year = row[7], row[8], row[9]
-    return f'{make} {model}' + (f' {year}' if year else '') if (make or model) else 'Автомобиль по VIN'
+    make, model, year, plate = row[7], row[8], row[9], row[11]
+    label = f'{make} {model}'.strip() if (make or model) else 'Автомобиль'
+    if plate:
+        return f'{label} — {plate}'
+    return f'{label} — номер не указан'
 
 
 def short_price(offer):
@@ -66,7 +69,7 @@ async def order_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_order_details(update: Update, row):
     order_id, request_id, _, status, created, updated, offer_text, make, model, year, vin, plate, request_text, phone = row
     vehicle_lines = []
-    for label, value in [('Марка', make), ('Модель', model), ('Год', year), ('VIN', vin), ('Госномер', plate)]:
+    for label, value in [('Марка', make), ('Модель', model), ('Год', year), ('VIN / номер кузова', vin), ('Госномер', plate)]:
         if value:
             vehicle_lines.append(f'{label}: {value}')
     vehicle = '\n'.join(vehicle_lines) if vehicle_lines else 'не указан'

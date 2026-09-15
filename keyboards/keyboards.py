@@ -14,6 +14,7 @@ def main_menu():
             ['🔧 Подобрать запчасть'],
             ['📋 Мои заявки'],
             ['🛒 Мои заказы'],
+            ['💬 Связаться с Запчасти+'],
             ['🚗 Мои автомобили'],
             ['📱 Мой телефон'],
             ['👤 Мои данные'],
@@ -84,9 +85,28 @@ def order_confirm_keyboard(request_id):
             callback_data=f'order_create:{request_id}',
         )],
         [InlineKeyboardButton(
+            '💬 Задать вопрос',
+            callback_data=f'customer_reply:request:{request_id}',
+        )],
+        [InlineKeyboardButton(
             '❌ Отказаться',
             callback_data=f'order_decline:{request_id}',
         )],
+    ])
+
+
+def customer_reply_keyboard(request_id=None, order_id=None):
+    target_type = 'order' if order_id else 'request'
+    target_id = order_id or request_id
+    if not target_id:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton('💬 Ответить', callback_data='customer_reply:general:0')]
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            '💬 Ответить',
+            callback_data=f'customer_reply:{target_type}:{target_id}',
+        )]
     ])
 
 
@@ -96,6 +116,8 @@ def admin_menu():
             ['📋 Новые заявки'],
             ['🔎 Все заявки'],
             ['🛒 Заказы'],
+            ['💬 Сообщения'],
+            ['👥 Клиенты'],
             ['📊 Статистика'],
             ['🏠 Клиентское меню'],
         ],
@@ -115,6 +137,13 @@ def admin_request_actions():
         resize_keyboard=True,
     )
 
+
+
+def admin_message_thread_actions():
+    return ReplyKeyboardMarkup(
+        [['💬 Ответить'], ['⬅️ К сообщениям']],
+        resize_keyboard=True,
+    )
 
 def admin_order_actions():
     return ReplyKeyboardMarkup(

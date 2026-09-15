@@ -16,7 +16,7 @@ from handlers.menu import menu_handler
 from handlers.profile import edit_name, edit_phone
 from handlers.cars import (
     show_cars, add_car_start, car_make, car_model, car_year,
-    car_vin, car_plate, delete_car_start, delete_car_handler,
+    car_vin, car_plate, delete_car_start, delete_car_handler, car_back,
 )
 from handlers.requests import (
     start_request, request_car, request_vin, request_text,
@@ -25,6 +25,7 @@ from handlers.requests import (
 )
 from handlers.orders import order_create_handler, order_decline_handler
 from handlers.customer_orders import order_list, order_details
+from handlers.customer_chat import start_customer_reply, receive_customer_message
 from handlers.admin import (
     admin_entry, admin_menu_handler, admin_request_or_order_list,
     admin_request_or_order_details, admin_message,
@@ -60,6 +61,7 @@ def main():
             MENU: [
                 CallbackQueryHandler(order_create_handler, pattern=r'^order_create:\d+$'),
                 CallbackQueryHandler(order_decline_handler, pattern=r'^order_decline:\d+$'),
+                CallbackQueryHandler(start_customer_reply, pattern=r'^customer_reply:(request|order|general):\d+$'),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler),
             ],
             REQUEST_CAR: [
@@ -96,16 +98,35 @@ def main():
                 MessageHandler(filters.Regex(r'^⬅️ К заявкам$'), request_details),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, request_details),
             ],
-            CAR_MAKE: [MessageHandler(filters.TEXT & ~filters.COMMAND, car_make)],
-            CAR_MODEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, car_model)],
-            CAR_YEAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, car_year)],
-            CAR_VIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, car_vin)],
-            CAR_PLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, car_plate)],
+            CAR_MAKE: [
+                MessageHandler(filters.Regex(r'^(?:⬅️\s*)?Назад$'), car_back),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, car_make),
+            ],
+            CAR_MODEL: [
+                MessageHandler(filters.Regex(r'^(?:⬅️\s*)?Назад$'), car_back),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, car_model),
+            ],
+            CAR_YEAR: [
+                MessageHandler(filters.Regex(r'^(?:⬅️\s*)?Назад$'), car_back),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, car_year),
+            ],
+            CAR_VIN: [
+                MessageHandler(filters.Regex(r'^(?:⬅️\s*)?Назад$'), car_back),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, car_vin),
+            ],
+            CAR_PLATE: [
+                MessageHandler(filters.Regex(r'^(?:⬅️\s*)?Назад$'), car_back),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, car_plate),
+            ],
             DELETE_CAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, delete_car_handler)],
             EDIT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_name)],
             EDIT_PHONE: [
                 MessageHandler(filters.CONTACT, edit_phone),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, edit_phone),
+            ],
+            CUSTOMER_MESSAGE: [
+                MessageHandler(filters.Regex(r'^⬅️ Назад$'), cancel),
+                MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, receive_customer_message),
             ],
             ADMIN_MENU: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, admin_menu_handler),
