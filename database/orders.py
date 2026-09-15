@@ -91,6 +91,24 @@ def get_user_orders(user_id):
     return rows
 
 
+def get_all_orders(status=None):
+    conn = db()
+    cur = conn.cursor()
+    base = '''SELECT
+        o.id,o.request_id,o.telegram_id,o.status,o.created_at,o.updated_at,o.offer_text,
+        r.make,r.model,r.year,r.request_text,r.phone
+    FROM orders o
+    JOIN requests r ON r.id=o.request_id
+    '''
+    if status:
+        cur.execute(base + 'WHERE o.status=? ORDER BY o.id DESC', (status,))
+    else:
+        cur.execute(base + 'ORDER BY o.id DESC')
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
 def update_order_status(order_id, status):
     now = _now()
     conn = db()
