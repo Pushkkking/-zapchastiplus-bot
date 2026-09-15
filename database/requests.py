@@ -48,3 +48,18 @@ def get_stats():
     cur.execute("SELECT COUNT(*) FROM requests WHERE status='✅ Выполнена'"); done=cur.fetchone()[0]
     cur.execute("SELECT COUNT(*) FROM requests WHERE status='❌ Отменена'"); cancelled=cur.fetchone()[0]
     conn.close(); return total,new,selecting,offer,done,cancelled
+
+
+def set_offer(request_id, offer_text):
+    now=datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+    conn=db(); cur=conn.cursor()
+    cur.execute('UPDATE requests SET offer_text=?,status=?,updated_at=? WHERE id=?',
+                (offer_text, '💰 Предложение готово', now, request_id))
+    conn.commit(); conn.close()
+
+
+def get_offer(request_id):
+    conn=db(); cur=conn.cursor()
+    cur.execute('SELECT offer_text FROM requests WHERE id=?', (request_id,))
+    row=cur.fetchone(); conn.close()
+    return row[0] if row else None

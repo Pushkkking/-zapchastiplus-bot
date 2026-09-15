@@ -2,7 +2,7 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from config import OWNER_ID
-from database.requests import get_all_requests, get_request, update_status, get_stats
+from database.requests import get_all_requests, get_request, update_status, get_stats, set_offer, get_offer
 from database.orders import get_all_orders, get_order, update_order_status, get_order_stats
 from database.users import get_name, get_phone, get_username
 from keyboards.keyboards import admin_menu, main_menu, admin_order_actions
@@ -165,6 +165,9 @@ async def send_admin_details(update, row):
         f'🚗 АВТОМОБИЛЬ\n{vehicle}\n\n'
         f'🔧 ЧТО НУЖНО:\n{request_text}'
     )
+    offer = get_offer(request_id)
+    if offer:
+        message += f'\n\n💰 ПРЕДЛОЖЕНИЕ:\n{offer}'
     await update.message.reply_text(message, reply_markup=admin_request_keyboard())
 
 
@@ -179,6 +182,17 @@ async def admin_details(update, context):
     if text == '⬅️ К заявкам':
         return await admin_list(update, context, context.user_data.get('admin_list_mode'))
 
+    if text == '💰 Предложение готово':
+        context.user_data['admin_message_target'] = 'offer'
+        await update.message.reply_text(
+            f'💰 Заявка №{request_id}\n\n'
+            'Введите предложение для клиента одним сообщением.\n'
+            'Можно указать запчасти, количество, цены, работу и итоговую сумму.\n\n'
+            'Пример формата: запчасть — 1 500 ₽; работа — 800 ₽; итого — 2 300 ₽.\n\n'
+            'Для отмены нажмите /cancel'
+        )
+        return ADMIN_MESSAGE
+
     if text in REQUEST_STATUSES:
         new_status = REQUEST_STATUSES[text]
         update_status(request_id, new_status)
@@ -190,24 +204,13 @@ async def admin_details(update, context):
         await send_admin_details(update, row)
 
         try:
-            if new_status == '💰 Предложение готово':
-                from keyboards.keyboards import order_confirm_keyboard
-                await context.bot.send_message(
-                    chat_id=row[1],
-                    text=(
-                        f'💰 По заявке №{request_id} подготовлено предложение.\n\n'
-                        'Если всё устраивает, вы можете оформить заказ прямо в боте.'
-                    ),
-                    reply_markup=order_confirm_keyboard(request_id),
-                )
-            else:
-                await context.bot.send_message(
-                    chat_id=row[1],
-                    text=(
-                        f'📋 По вашей заявке №{request_id} изменился статус:\n\n'
-                        f'{new_status}'
-                    ),
-                )
+            await context.bot.send_message(
+                chat_id=row[1],
+                text=(
+                    f'📋 По вашей заявке №{request_id} изменился статус:\n\n'
+                    f'{new_status}'
+                ),
+            )
         except Exception:
             await update.message.reply_text(
                 '⚠️ Статус изменён, но уведомление клиенту отправить не удалось.'
@@ -361,6 +364,41 @@ async def admin_message(update, context):
         return ADMIN_MESSAGE
 
     target = context.user_data.get('admin_message_target', 'request')
+
+    if target == 'offer':
+        request_id = context.user_data.get('admin_request_id')
+        row = get_request(request_id) if request_id else None
+        if not row:
+            return await admin_entry(update, context)
+
+        set_offer(request_id, text)
+
+        try:
+            from keyboards.keyboards import order_confirm_keyboard
+            await context.bot.send_message(
+                chat_id=row[1],
+                text=(
+                    f'💰 Предложение по заявке №{request_id}\n\n'
+                    f'{text}\n\n'
+                    'Если всё устраивает, нажмите «Оформить заказ». ' 
+                    'Если предложение не подходит — нажмите «Отказаться». '
+                ),
+                reply_markup=order_confirm_keyboard(request_id),
+            )
+        except Exception:
+            await update.message.reply_text(
+                '❌ Предложение сохранено, но отправить его клиенту не удалось.'
+            )
+            row = get_request(request_id)
+            await send_admin_details(update, row)
+            return ADMIN_REQUEST_DETAILS
+
+        await update.message.reply_text(
+            '✅ Предложение сохранено и отправлено клиенту.'
+        )
+        row = get_request(request_id)
+        await send_admin_details(update, row)
+        return ADMIN_REQUEST_DETAILS
 
     if target == 'order':
         order_id = context.user_data.get('admin_order_id')
