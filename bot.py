@@ -57,6 +57,8 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_name),
             ],
             MENU: [
+                CallbackQueryHandler(order_create_handler, pattern=r'^order_create:\d+$'),
+                CallbackQueryHandler(order_decline_handler, pattern=r'^order_decline:\d+$'),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler),
             ],
             REQUEST_CAR: [
@@ -111,8 +113,6 @@ def main():
         fallbacks=[CommandHandler('cancel', cancel)],
     )
 
-    app.add_handler(CallbackQueryHandler(order_create_handler, pattern=r'^order_create:\d+$'))
-    app.add_handler(CallbackQueryHandler(order_decline_handler, pattern=r'^order_decline:\d+$'))
     app.add_handler(conv)
     print('Бот запущен...')
     app.run_polling()

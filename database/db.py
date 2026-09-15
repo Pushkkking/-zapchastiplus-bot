@@ -1,10 +1,46 @@
+import os
+import shutil
 import sqlite3
+
 from config import DB_NAME
 
 
+def _prepare_database_path():
+    """Prepare the persistent Railway Volume database path.
+
+    On the first launch after attaching /data, an existing SQLite database
+    from the old ephemeral working directory is copied to the Volume if the
+    Volume does not already contain a database.
+    """
+    target = os.path.abspath(DB_NAME)
+
+    # Only perform the automatic migration when the application is configured
+    # to use Railway's default /data path.
+    if not target.startswith('/data/'):
+        return target
+
+    os.makedirs('/data', exist_ok=True)
+    if os.path.exists(target):
+        return target
+
+    legacy = os.path.abspath('zapchasti_plus.db')
+    if os.path.exists(legacy) and legacy != target:
+        shutil.copy2(legacy, target)
+        # Preserve SQLite WAL/SHM files too if they exist. Usually they won't,
+        # but copying them avoids an incomplete database state on first boot.
+        for suffix in ('-wal', '-shm'):
+            legacy_sidecar = legacy + suffix
+            if os.path.exists(legacy_sidecar):
+                shutil.copy2(legacy_sidecar, target + suffix)
+
+    return target
+
+
 def db():
-    conn = sqlite3.connect(DB_NAME)
+    path = _prepare_database_path()
+    conn = sqlite3.connect(path, timeout=30)
     conn.execute('PRAGMA foreign_keys = ON')
+    conn.execute('PRAGMA busy_timeout = 30000')
     return conn
 
 
