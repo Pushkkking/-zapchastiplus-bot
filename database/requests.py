@@ -26,11 +26,21 @@ def get_request(request_id, user_id=None):
 
 
 def get_all_requests(status=None):
+    # Заявки, по которым заказ уже выдан или отменён, считаем архивными.
+    # Они остаются в базе и истории клиента, но не отображаются в админском
+    # разделе «Все заявки».
     conn=db(); cur=conn.cursor()
+    base='''SELECT r.id,r.telegram_id,r.make,r.model,r.year,r.request_text,r.status,r.created_at
+            FROM requests r
+            WHERE NOT EXISTS (
+                SELECT 1 FROM orders o
+                WHERE o.request_id=r.id
+                  AND o.status IN ('🚗 Выдан','❌ Отменён')
+            )'''
     if status:
-        cur.execute('''SELECT id,telegram_id,make,model,year,request_text,status,created_at FROM requests WHERE status=? ORDER BY id DESC''',(status,))
+        cur.execute(base + ' AND r.status=? ORDER BY r.id DESC',(status,))
     else:
-        cur.execute('''SELECT id,telegram_id,make,model,year,request_text,status,created_at FROM requests ORDER BY id DESC''')
+        cur.execute(base + ' ORDER BY r.id DESC')
     rows=cur.fetchall(); conn.close(); return rows
 
 

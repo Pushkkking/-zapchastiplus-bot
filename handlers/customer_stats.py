@@ -2,9 +2,9 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from database.orders import get_user_orders
-from database.loyalty import get_level, get_next_level
-from keyboards.keyboards import main_menu
-from states import MENU, PROFILE_MENU
+from database.loyalty import get_level, get_next_level, parse_amount
+from keyboards.keyboards import profile_menu
+from states import PROFILE_MENU
 
 
 def get_customer_statistics(user_id):
@@ -12,15 +12,37 @@ def get_customer_statistics(user_id):
     active = [r for r in rows if r[3] != '❌ Отменён']
     completed = [r for r in rows if r[3] == '🚗 Выдан']
 
-    def amount(row):
-        from database.loyalty import parse_amount
-        return parse_amount(row[6])
+    # get_user_orders() возвращает offer_text в позиции 6.
+    # Кешбэк хранится отдельно в orders.cashback_amount, поэтому
+    # читаем его напрямую, не путая с данными автомобиля.
+    import sqlite3
+    from config import DB_NAME
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+    cur.execute(
+        '''SELECT offer_text, cashback_amount
+           FROM orders
+           WHERE telegram_id=? AND status='🚗 Выдан'
+           ORDER BY id''',
+        (user_id,),
+    )
+    completed_rows = cur.fetchall()
+    conn.close()
 
-    completed_amount = sum(amount(r) for r in completed)
-    cashback_balance = sum(float(r[7] or 0) for r in completed)
+    completed_amount = sum(parse_amount(row[0]) for row in completed_rows)
+    cashback_balance = sum(float(row[1] or 0) for row in completed_rows)
     level_name, cashback_rate = get_level(completed_amount)
     next_level = get_next_level(completed_amount)
-    return len(active), completed_amount, len(completed), cashback_balance, level_name, cashback_rate, next_level
+
+    return (
+        len(active),
+        completed_amount,
+        len(completed),
+        cashback_balance,
+        level_name,
+        cashback_rate,
+        next_level,
+    )
 
 
 async def show_customer_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -55,6 +77,5 @@ async def show_customer_stats(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         text += '\n\n🎉 У вас максимальный уровень кешбэка!'
 
-    from keyboards.keyboards import profile_menu
     await update.message.reply_text(text, reply_markup=profile_menu())
     return PROFILE_MENU

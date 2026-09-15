@@ -151,6 +151,16 @@ def update_order_status(order_id, status):
         'UPDATE orders SET status=?,updated_at=?,cashback_amount=? WHERE id=?',
         (status, now, cashback_amount, order_id),
     )
+
+    # После выдачи или отмены заказ закрывает исходную заявку.
+    # Саму заявку физически не удаляем: она нужна для истории заказа
+    # и повторного заказа, но в списках заявок она больше не показывается.
+    if status in ('🚗 Выдан', '❌ Отменён'):
+        cur.execute(
+            "UPDATE requests SET status='🗄 Архив',updated_at=? WHERE id=(SELECT request_id FROM orders WHERE id=?)",
+            (now, order_id),
+        )
+
     conn.commit()
     conn.close()
 
@@ -199,6 +209,10 @@ def cancel_order(order_id, user_id):
     cur.execute(
         'UPDATE orders SET status=?,updated_at=? WHERE id=? AND telegram_id=?',
         ('❌ Отменён', now, order_id, user_id),
+    )
+    cur.execute(
+        "UPDATE requests SET status='🗄 Архив',updated_at=? WHERE id=(SELECT request_id FROM orders WHERE id=?)",
+        (now, order_id),
     )
     conn.commit()
     conn.close()
