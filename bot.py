@@ -13,7 +13,7 @@ from config import BOT_TOKEN
 from database.db import init_db
 from handlers.start import start, receive_name, consent_handler, cancel
 from handlers.menu import menu_handler
-from handlers.profile import edit_name, edit_phone, start_edit_data
+from handlers.profile import edit_name, edit_phone, start_edit_data, show_referral, start_promo_from_profile
 from handlers.cars import (
     show_cars, add_car_start, car_make, car_model, car_year,
     car_vin, car_plate, delete_car_start, delete_car_handler, car_back,
@@ -23,11 +23,33 @@ from handlers.requests import (
     request_phone, back_to_menu,
 )
 from handlers.customer_cases import show_cases, case_list, case_details
-from handlers.orders import order_create_handler, order_decline_handler, cashback_use_handler
+from handlers.orders import order_create_handler, order_decline_handler, cashback_use_handler, promo_enter_handler, promo_apply_handler
 from handlers.customer_orders import order_list, order_details
 from handlers.customer_chat import start_customer_reply, receive_customer_message
-from handlers.customer_stats import show_customer_stats
+from handlers.customer_stats import show_customer_stats, show_bonus_history
 from handlers.customer_card import show_customer_card
+async def promo_add_command(update, context):
+    from config import OWNER_ID
+    if update.effective_user.id != OWNER_ID:
+        return
+    from database.promos import create_promo
+    args = context.args
+    if len(args) < 3:
+        await update.message.reply_text('Формат: /promoadd КОД percent 10 [лимит]\nили /promoadd КОД fixed 500 [лимит]')
+        return
+    code, kind, value = args[0], args[1].lower(), args[2]
+    try:
+        value = float(value)
+        limit = int(args[3]) if len(args) > 3 else None
+    except ValueError:
+        await update.message.reply_text('❌ Проверьте значение скидки и лимит.')
+        return
+    if kind not in ('percent', 'fixed'):
+        await update.message.reply_text('❌ Тип: percent или fixed.')
+        return
+    ok = create_promo(code, kind, value, limit)
+    await update.message.reply_text('✅ Промокод создан.' if ok else '❌ Не удалось создать промокод. Возможно, такой код уже есть.')
+
 from handlers.admin import (
     admin_entry, admin_menu_handler, admin_request_or_order_list,
     admin_request_or_order_details, admin_message,
@@ -51,6 +73,7 @@ def main():
         entry_points=[
             CommandHandler('start', start),
             CommandHandler('admin', admin_entry),
+            CommandHandler('promoadd', promo_add_command),
         ],
         allow_reentry=True,
         states={
@@ -63,6 +86,8 @@ def main():
             MENU: [
                 CallbackQueryHandler(order_create_handler, pattern=r'^order_create:\d+(?::[0-9.]+)?$'),
                 CallbackQueryHandler(cashback_use_handler, pattern=r'^cashback_use:\d+$'),
+                CallbackQueryHandler(promo_enter_handler, pattern=r'^promo_enter:\d+$'),
+                CallbackQueryHandler(show_bonus_history, pattern=r'^bonus_history$'),
                 CallbackQueryHandler(order_decline_handler, pattern=r'^order_decline:\d+$'),
                 CallbackQueryHandler(start_customer_reply, pattern=r'^customer_reply:(request|order|general):\d+$'),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler),
@@ -122,11 +147,17 @@ def main():
             DELETE_CAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, delete_car_handler)],
             EDIT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_name)],
             PROFILE_MENU: [
+                CallbackQueryHandler(show_bonus_history, pattern=r'^bonus_history$'),
                 MessageHandler(filters.Regex(r'^📊 Моя статистика$'), show_customer_stats),
                 MessageHandler(filters.Regex(r'^💳 Моя карта$'), show_customer_card),
+                MessageHandler(filters.Regex(r'^👥 Пригласить друга$'), show_referral),
+                MessageHandler(filters.Regex(r'^🎟 Промокод$'), start_promo_from_profile),
                 MessageHandler(filters.Regex(r'^✏️ Изменить данные$'), start_edit_data),
                 MessageHandler(filters.Regex(r'^⬅️ Назад$'), back_to_menu),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler),
+            ],
+            PROMO_CODE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, promo_apply_handler),
             ],
             EDIT_PHONE: [
                 MessageHandler(filters.CONTACT, edit_phone),
@@ -149,7 +180,7 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, admin_message),
             ],
         },
-        fallbacks=[CommandHandler('cancel', cancel)],
+        fallbacks=[CommandHandler('cancel', cancel), CommandHandler('promoadd', promo_add_command)],
     )
 
     app.add_handler(conv)

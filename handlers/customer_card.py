@@ -3,7 +3,7 @@ import qrcode
 import barcode
 from barcode.writer import ImageWriter
 
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
 from config import BOT_USERNAME
@@ -59,6 +59,7 @@ async def show_customer_card(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.reply_photo(
         photo=bio,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('📜 История бонусов', callback_data='bonus_history')]]),
         caption=(
             '💳 КАРТА ПОСТОЯННОГО КЛИЕНТА\n\n'
             f'🔢 Номер карты: {card_number}\n'

@@ -24,4 +24,5 @@
     ORDER_DETAILS,
     CUSTOMER_MESSAGE,
     PROFILE_MENU,
-) = range(25)
+    PROMO_CODE,
+) = range(26)

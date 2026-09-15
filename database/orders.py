@@ -8,7 +8,7 @@ def _now():
     return datetime.now().strftime('%d.%m.%Y %H:%M:%S')
 
 
-def create_order(request_id, telegram_id, cashback_used=0):
+def create_order(request_id, telegram_id, cashback_used=0, promo=None):
     now = _now()
     conn = db(); cur = conn.cursor()
     cur.execute('SELECT id FROM orders WHERE request_id=? AND status!=?', (request_id, '❌ Отменён'))
@@ -20,7 +20,10 @@ def create_order(request_id, telegram_id, cashback_used=0):
     offer_row = cur.fetchone()
     offer_text = offer_row[0] if offer_row else None
     offer_amount = parse_amount(offer_text)
-    cashback_used = round(max(0.0, min(float(cashback_used or 0), offer_amount * 0.5)), 2)
+    promo_discount = float((promo or {}).get('discount', 0) or 0)
+    promo_discount = round(max(0.0, min(promo_discount, offer_amount)), 2)
+    cashback_base = max(0.0, offer_amount - promo_discount)
+    cashback_used = round(max(0.0, min(float(cashback_used or 0), cashback_base * 0.5)), 2)
 
     # Списываем кешбэк только в момент подтверждения заказа.
     balance = get_balance(telegram_id)
@@ -32,6 +35,9 @@ def create_order(request_id, telegram_id, cashback_used=0):
         (request_id, telegram_id, '🆕 Новый', now, now, offer_text))
     order_id = cur.lastrowid
 
+    if promo and promo_discount > 0:
+        from database.promos import redeem_promo
+        redeem_promo(promo.get('id'), telegram_id, order_id, promo_discount)
     if cashback_used > 0:
         cur.execute('''INSERT INTO cashback_transactions
             (telegram_id, order_id, amount, kind, note, created_at)
@@ -107,7 +113,9 @@ def update_order_status(order_id, status):
     if status == '🚗 Выдан' and old_status != '🚗 Выдан':
         gross = parse_amount(offer_text)
         spent = get_order_spent(order_id)
-        paid = max(0.0, gross - spent)
+        cur.execute('SELECT promo_discount FROM orders WHERE id=?', (order_id,))
+        promo_discount = float(cur.fetchone()[0] or 0)
+        paid = max(0.0, gross - promo_discount - spent)
         previous_paid = _completed_paid_total(cur, user_id, order_id)
         cashback_amount = calculate_cashback(previous_paid + paid, paid)
         if cashback_amount > 0 and not has_transaction(order_id, 'earned'):
@@ -117,6 +125,12 @@ def update_order_status(order_id, status):
                 (user_id, order_id, cashback_amount,
                  f'Начисление за покупку на {paid:,.2f} ₽'.replace(',', ' '), now))
     elif status == '❌ Отменён':
+        # Если заказ отменён, возвращаем использованный кешбэк и освобождаем промокод.
+        cur.execute('SELECT promo_code, promo_discount FROM orders WHERE id=?', (order_id,))
+        promo_row = cur.fetchone()
+        if promo_row and promo_row[0]:
+            from database.promos import release_promo
+            release_promo(promo_row[0], user_id, order_id)
         # Если при оформлении использовали кешбэк, возвращаем его один раз.
         spent = get_order_spent(order_id)
         if spent > 0 and not has_transaction(order_id, 'refunded'):
@@ -127,6 +141,12 @@ def update_order_status(order_id, status):
     
     cur.execute('UPDATE orders SET status=?,updated_at=?,cashback_amount=? WHERE id=?',
                 (status, now, cashback_amount, order_id))
+    if status == '🚗 Выдан':
+        try:
+            from database.referrals import reward_referral_if_needed
+            reward_referral_if_needed(user_id, order_id)
+        except Exception:
+            pass
 
     if status in ('🚗 Выдан', '❌ Отменён'):
         cur.execute("UPDATE requests SET status='🗄 Архив',updated_at=? WHERE id=(SELECT request_id FROM orders WHERE id=?)", (now, order_id))

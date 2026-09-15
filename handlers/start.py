@@ -31,6 +31,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     save_user(user)
 
+    # Реферальная ссылка: /start ref_CODE. Сам себя пригласить нельзя.
+    if context.args and context.args[0].startswith('ref_'):
+        from database.users import get_user_by_referral_code, set_referred_by
+        ref_code=context.args[0][4:]
+        referrer=get_user_by_referral_code(ref_code)
+        set_referred_by(user.id, referrer)
+
     # QR-карта постоянного клиента открывает этот deep-link на телефоне
     # сотрудника. Только владелец бота может увидеть данные клиента.
     if context.args and context.args[0].startswith('card_') and user.id == OWNER_ID:

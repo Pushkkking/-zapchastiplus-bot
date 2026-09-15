@@ -115,6 +115,27 @@ def init_db():
         created_at TEXT NOT NULL
     )''')
 
+
+    cur.execute('''CREATE TABLE IF NOT EXISTS promo_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL DEFAULT 'percent',
+        value REAL NOT NULL,
+        max_uses INTEGER,
+        used_count INTEGER NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1,
+        expires_at TEXT
+    )''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS promo_redemptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        promo_id INTEGER NOT NULL,
+        telegram_id INTEGER NOT NULL,
+        order_id INTEGER,
+        discount REAL NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(promo_id, telegram_id, order_id)
+    )''')
+
     cur.execute('''CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         telegram_id INTEGER NOT NULL,
@@ -134,10 +155,15 @@ def init_db():
     _add_column(cur, 'users', 'consent_at', 'TEXT')
     _add_column(cur, 'users', 'card_token', 'TEXT')
     _add_column(cur, 'users', 'card_number', 'TEXT')
+    _add_column(cur, 'users', 'referral_code', 'TEXT')
+    _add_column(cur, 'users', 'referred_by', 'INTEGER')
+    _add_column(cur, 'users', 'referral_rewarded', 'INTEGER NOT NULL DEFAULT 0')
     _add_column(cur, 'requests', 'updated_at', "TEXT NOT NULL DEFAULT ''")
     _add_column(cur, 'requests', 'offer_text', 'TEXT')
     _add_column(cur, 'orders', 'offer_text', 'TEXT')
     _add_column(cur, 'orders', 'cashback_amount', 'REAL NOT NULL DEFAULT 0')
+    _add_column(cur, 'orders', 'promo_code', 'TEXT')
+    _add_column(cur, 'orders', 'promo_discount', 'REAL NOT NULL DEFAULT 0')
     _add_column(cur, 'messages', 'message_type', "TEXT NOT NULL DEFAULT 'text'")
     _add_column(cur, 'messages', 'file_id', 'TEXT')
 
@@ -175,6 +201,20 @@ def init_db():
                     continue
         else:
             cur.execute('UPDATE users SET card_token=? WHERE telegram_id=?', (token, user_id))
+
+
+    # Уникальные реферальные коды существующих клиентов.
+    from database.users import make_referral_code
+    cur.execute('SELECT telegram_id, referral_code FROM users')
+    for user_id, code in cur.fetchall():
+        if not code:
+            while True:
+                new_code = make_referral_code()
+                try:
+                    cur.execute('UPDATE users SET referral_code=? WHERE telegram_id=?', (new_code, user_id))
+                    break
+                except sqlite3.IntegrityError:
+                    continue
 
     # Переносим уже начисленный кешбэк из orders в журнал операций.
     cur.execute("SELECT id, telegram_id, cashback_amount FROM orders WHERE cashback_amount>0 AND status='🚗 Выдан' ORDER BY id")

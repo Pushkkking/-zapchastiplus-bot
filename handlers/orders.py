@@ -7,7 +7,7 @@ from database.orders import create_order, get_order_by_request, get_order_spent
 from database.cashback import get_balance
 from database.loyalty import parse_amount
 from keyboards.keyboards import main_menu, order_confirm_keyboard
-from states import MENU
+from states import MENU, PROMO_CODE, PROFILE_MENU
 
 
 def _cashback_max(user_id, offer_text):
@@ -83,7 +83,8 @@ async def order_create_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     offer_text = get_offer(request_id) or ''
     max_cashback = _cashback_max(user_id, offer_text)
     cashback_used = min(max(0.0, cashback_used), max_cashback)
-    order_id, created = create_order(request_id, user_id, cashback_used)
+    promo = context.user_data.pop(f'promo_{request_id}', None)
+    order_id, created = create_order(request_id, user_id, cashback_used, promo)
     if not created:
         await query.edit_message_text(f'🛒 Заказ №{order_id} уже оформлен.\n\nМы свяжемся с вами для подтверждения деталей.')
         return MENU
@@ -136,4 +137,43 @@ async def order_decline_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text('Заявка не найдена.')
         return MENU
     await query.edit_message_text('Хорошо. Заказ не оформлен.\n\nЕсли захотите вернуться к предложению, напишите нам.')
+    return MENU
+
+
+async def promo_enter_handler(update, context):
+    query = update.callback_query
+    if not query:
+        return PROMO_CODE
+    await query.answer()
+    try:
+        request_id = int(query.data.split(':')[1])
+    except Exception:
+        return MENU
+    request = get_request(request_id, update.effective_user.id)
+    if not request or request[9] != '💰 Предложение готово':
+        await query.edit_message_text('Предложение уже недоступно для оформления.')
+        return MENU
+    context.user_data['promo_request_id'] = request_id
+    await query.edit_message_text('🎟 Введите промокод сообщением.\n\nЕсли передумали, просто нажмите «⬅️ Назад» после возврата в меню.')
+    return PROMO_CODE
+
+
+async def promo_apply_handler(update, context):
+    code = update.message.text.strip().upper()
+    request_id = context.user_data.get('promo_request_id')
+    if not request_id:
+        return MENU
+    offer = get_offer(request_id) or ''
+    from database.promos import validate_promo
+    promo, error = validate_promo(code, update.effective_user.id, parse_amount(offer))
+    if error:
+        await update.message.reply_text(error + '\n\nВведите другой промокод.')
+        return PROMO_CODE
+    context.user_data[f'promo_{request_id}'] = promo
+    context.user_data.pop('promo_request_id', None)
+    balance = get_balance(update.effective_user.id)
+    max_cashback = round(min(balance, max(0.0, parse_amount(offer) - promo['discount']) * 0.5), 2)
+    await update.message.reply_text(
+        f'🎟 Промокод {promo["code"]} применён!\n\nСкидка: {promo["discount"]:,.2f} ₽\n\nТеперь выберите вариант оформления заказа.'.replace(',', ' '),
+        reply_markup=order_confirm_keyboard(request_id, balance, max_cashback))
     return MENU

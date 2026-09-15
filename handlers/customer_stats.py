@@ -51,6 +51,26 @@ async def show_customer_stats(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         text += '\n\n🎉 У вас максимальный уровень кешбэка!'
 
-    await update.message.reply_text(text, reply_markup=profile_menu())
+    if update.callback_query:
+        await update.callback_query.message.reply_text(text, reply_markup=profile_menu())
+    else:
+        await update.message.reply_text(text, reply_markup=profile_menu())
     return PROFILE_MENU
 
+
+
+async def show_bonus_history(update, context):
+    from database.cashback import get_transactions
+    rows=get_transactions(update.effective_user.id, limit=20)
+    if not rows:
+        text='📜 История бонусов\n\nПока операций нет.'
+    else:
+        parts=['📜 История бонусов','']
+        for amount,kind,order_id,note,created_at in rows:
+            sign='+' if amount>0 else ''
+            label=note or kind
+            order=f' · заказ №{order_id}' if order_id else ''
+            parts.append(f'{sign}{amount:,.2f} ₽ — {label}{order}\n{created_at}'.replace(',', ' '))
+        text='\n'.join(parts)
+    await update.message.reply_text(text, reply_markup=profile_menu())
+    return PROFILE_MENU

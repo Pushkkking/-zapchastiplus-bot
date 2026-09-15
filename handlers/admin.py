@@ -53,6 +53,24 @@ async def admin_entry(update, context):
 
 
 async def admin_menu_handler(update, context):
+    if update.message.text.strip() == '🎟 Промокоды':
+        if not require_owner(update):
+            return MENU
+        from database.promos import list_promos
+        rows = list_promos()
+        lines = ['🎟 Промокоды', '']
+        if not rows:
+            lines.append('Пока промокодов нет.')
+        else:
+            for code, kind, value, max_uses, used_count, active, expires in rows:
+                discount = f'{value:g}%' if kind == 'percent' else f'{value:g} ₽'
+                limit = f'{used_count}/{max_uses}' if max_uses is not None else f'{used_count}/∞'
+                status = '✅' if active else '❌'
+                lines.append(f'{status} {code} — {discount} — {limit}')
+        lines += ['', 'Создать: /promoadd КОД percent 10 [лимит]', 'Или: /promoadd КОД fixed 500 [лимит]']
+        await update.message.reply_text('\n'.join(lines), reply_markup=admin_menu())
+        return ADMIN_MENU
+
     if not require_owner(update):
         return MENU
 

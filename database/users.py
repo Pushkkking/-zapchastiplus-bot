@@ -7,6 +7,10 @@ def _new_card_token():
     return secrets.token_urlsafe(9)
 
 
+def make_referral_code():
+    return 'ZP' + secrets.token_hex(4).upper()
+
+
 def _new_card_number(cur):
     """Stable customer card number for future 1C/cash-desk integration."""
     while True:
@@ -18,21 +22,22 @@ def _new_card_number(cur):
 
 def save_user(user):
     conn = db(); cur = conn.cursor()
-    cur.execute('SELECT telegram_id, card_token, card_number FROM users WHERE telegram_id = ?', (user.id,))
+    cur.execute('SELECT telegram_id, card_token, card_number, referral_code FROM users WHERE telegram_id = ?', (user.id,))
     row = cur.fetchone()
     if row:
         cur.execute('''UPDATE users SET telegram_name=?, username=? WHERE telegram_id=?''',
                     (user.full_name, user.username, user.id))
-        if not row[1] or not row[2]:
+        if not row[1] or not row[2] or not row[3]:
             token = row[1] or _new_card_token()
             number = row[2] or _new_card_number(cur)
-            cur.execute('UPDATE users SET card_token=?, card_number=? WHERE telegram_id=?', (token, number, user.id))
+            referral_code = row[3] or make_referral_code()
+            cur.execute('UPDATE users SET card_token=?, card_number=?, referral_code=? WHERE telegram_id=?', (token, number, referral_code, user.id))
     else:
         token = _new_card_token()
         cur.execute('''INSERT INTO users
-            (telegram_id, telegram_name, username, name, phone, consent_given, consent_at, card_token, card_number)
-            VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?)''',
-                    (user.id, user.full_name, user.username, None, None, token, _new_card_number(cur)))
+            (telegram_id, telegram_name, username, name, phone, consent_given, consent_at, card_token, card_number, referral_code)
+            VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)''',
+                    (user.id, user.full_name, user.username, None, None, token, _new_card_number(cur), make_referral_code()))
     conn.commit(); conn.close()
 
 
@@ -97,3 +102,33 @@ def get_user_summary(user_id):
     cur.execute('SELECT COUNT(*) FROM requests WHERE telegram_id=?', (user_id,)); requests=cur.fetchone()[0]
     cur.execute('SELECT COUNT(*) FROM orders WHERE telegram_id=?', (user_id,)); orders=cur.fetchone()[0]
     conn.close(); return user,cars,requests,orders
+
+
+def get_referral_code(user_id):
+    conn=db(); cur=conn.cursor(); cur.execute('SELECT referral_code FROM users WHERE telegram_id=?',(user_id,)); row=cur.fetchone(); conn.close(); return row[0] if row else None
+
+
+def get_user_by_referral_code(code):
+    conn=db(); cur=conn.cursor(); cur.execute('SELECT telegram_id FROM users WHERE referral_code=?',(str(code).upper(),)); row=cur.fetchone(); conn.close(); return row[0] if row else None
+
+
+def set_referred_by(user_id, referrer_id):
+    if not referrer_id or referrer_id == user_id: return False
+    conn=db(); cur=conn.cursor(); cur.execute('SELECT referred_by FROM users WHERE telegram_id=?',(user_id,)); row=cur.fetchone()
+    if row and row[0]: conn.close(); return False
+    cur.execute('UPDATE users SET referred_by=? WHERE telegram_id=?',(referrer_id,user_id)); conn.commit(); conn.close(); return True
+
+
+def get_referral_info(user_id):
+    conn=db(); cur=conn.cursor()
+    cur.execute('SELECT COUNT(*) FROM users WHERE referred_by=?',(user_id,)); invited=cur.fetchone()[0]
+    cur.execute('SELECT COUNT(*) FROM users WHERE referred_by=? AND referral_rewarded=1',(user_id,)); rewarded=cur.fetchone()[0]
+    conn.close(); return invited, rewarded
+
+
+def get_referrer(user_id):
+    conn=db(); cur=conn.cursor(); cur.execute('SELECT referred_by FROM users WHERE telegram_id=?',(user_id,)); row=cur.fetchone(); conn.close(); return row[0] if row and row[0] else None
+
+
+def mark_referral_rewarded(user_id):
+    conn=db(); cur=conn.cursor(); cur.execute('UPDATE users SET referral_rewarded=1 WHERE telegram_id=? AND referral_rewarded=0',(user_id,)); changed=cur.rowcount; conn.commit(); conn.close(); return changed
