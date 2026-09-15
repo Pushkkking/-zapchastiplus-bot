@@ -1,6 +1,8 @@
 import os
 import shutil
 import sqlite3
+import secrets
+from datetime import datetime
 
 from config import DB_NAME
 
@@ -62,7 +64,9 @@ def init_db():
         name TEXT,
         phone TEXT,
         consent_given INTEGER NOT NULL DEFAULT 0,
-        consent_at TEXT
+        consent_at TEXT,
+        card_token TEXT UNIQUE,
+        card_number TEXT UNIQUE
     )''')
 
     cur.execute('''CREATE TABLE IF NOT EXISTS cars (
@@ -101,6 +105,16 @@ def init_db():
         offer_text TEXT
     )''')
 
+    cur.execute('''CREATE TABLE IF NOT EXISTS cashback_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER NOT NULL,
+        order_id INTEGER,
+        amount REAL NOT NULL,
+        kind TEXT NOT NULL,
+        note TEXT,
+        created_at TEXT NOT NULL
+    )''')
+
     cur.execute('''CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         telegram_id INTEGER NOT NULL,
@@ -118,6 +132,8 @@ def init_db():
     _add_column(cur, 'users', 'name', 'TEXT')
     _add_column(cur, 'users', 'consent_given', 'INTEGER NOT NULL DEFAULT 0')
     _add_column(cur, 'users', 'consent_at', 'TEXT')
+    _add_column(cur, 'users', 'card_token', 'TEXT')
+    _add_column(cur, 'users', 'card_number', 'TEXT')
     _add_column(cur, 'requests', 'updated_at', "TEXT NOT NULL DEFAULT ''")
     _add_column(cur, 'requests', 'offer_text', 'TEXT')
     _add_column(cur, 'orders', 'offer_text', 'TEXT')
@@ -142,6 +158,33 @@ def init_db():
         cashback = calculate_cashback(before + amount, amount)
         cur.execute('UPDATE orders SET cashback_amount=? WHERE id=?', (cashback, order_id))
         completed_by_user[user_id] = before + amount
+
+    # Уникальные токены и стабильные номера карт для существующих клиентов.
+    cur.execute("SELECT telegram_id, card_token, card_number FROM users")
+    for user_id, existing_token, existing_number in cur.fetchall():
+        token = existing_token or secrets.token_urlsafe(9)
+        number = existing_number
+        if not number:
+            while True:
+                number = f"ZP-{secrets.randbelow(100_000_000):08d}"
+                try:
+                    cur.execute('UPDATE users SET card_token=?, card_number=? WHERE telegram_id=?', (token, number, user_id))
+                    break
+                except sqlite3.IntegrityError:
+                    number = None
+                    continue
+        else:
+            cur.execute('UPDATE users SET card_token=? WHERE telegram_id=?', (token, user_id))
+
+    # Переносим уже начисленный кешбэк из orders в журнал операций.
+    cur.execute("SELECT id, telegram_id, cashback_amount FROM orders WHERE cashback_amount>0 AND status='🚗 Выдан' ORDER BY id")
+    for order_id, user_id, amount in cur.fetchall():
+        exists = cur.execute("SELECT 1 FROM cashback_transactions WHERE order_id=? AND kind='earned' LIMIT 1", (order_id,)).fetchone()
+        if not exists:
+            cur.execute('''INSERT INTO cashback_transactions
+                (telegram_id, order_id, amount, kind, note, created_at)
+                VALUES (?, ?, ?, 'earned', ?, ?)''',
+                (user_id, order_id, float(amount), 'Перенос из истории заказов', datetime.now().strftime('%d.%m.%Y %H:%M:%S')))
 
     conn.commit()
     conn.close()

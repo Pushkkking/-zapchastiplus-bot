@@ -44,6 +44,7 @@ def profile_menu():
             ['✏️ Изменить имя'],
             ['📱 Изменить телефон'],
             ['📊 Моя статистика'],
+            ['💳 Моя карта'],
             ['⬅️ Назад'],
         ],
         resize_keyboard=True,
@@ -77,11 +78,17 @@ def consent_keyboard():
     return InlineKeyboardMarkup(buttons)
 
 
-def order_confirm_keyboard(request_id):
-    return InlineKeyboardMarkup([
+def order_confirm_keyboard(request_id, cashback_balance=0, max_cashback=0):
+    buttons = []
+    if cashback_balance > 0 and max_cashback > 0:
+        buttons.append([InlineKeyboardButton(
+            f'💳 Списать кешбэк (до {max_cashback:,.0f} ₽)'.replace(',', ' '),
+            callback_data=f'cashback_use:{request_id}',
+        )])
+    buttons.extend([
         [InlineKeyboardButton(
-            '✅ Оформить заказ',
-            callback_data=f'order_create:{request_id}',
+            '✅ Оформить без кешбэка',
+            callback_data=f'order_create:{request_id}:0',
         )],
         [InlineKeyboardButton(
             '💬 Задать вопрос',
@@ -92,6 +99,7 @@ def order_confirm_keyboard(request_id):
             callback_data=f'order_decline:{request_id}',
         )],
     ])
+    return InlineKeyboardMarkup(buttons)
 
 
 def customer_reply_keyboard(request_id=None, order_id=None):

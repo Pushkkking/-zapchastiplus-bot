@@ -8,41 +8,15 @@ from states import PROFILE_MENU
 
 
 def get_customer_statistics(user_id):
+    from database.cashback import get_balance, get_order_spent
     rows = get_user_orders(user_id)
     active = [r for r in rows if r[3] != '❌ Отменён']
     completed = [r for r in rows if r[3] == '🚗 Выдан']
-
-    # get_user_orders() возвращает offer_text в позиции 6.
-    # Кешбэк хранится отдельно в orders.cashback_amount, поэтому
-    # читаем его напрямую, не путая с данными автомобиля.
-    import sqlite3
-    from config import DB_NAME
-    conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
-    cur.execute(
-        '''SELECT offer_text, cashback_amount
-           FROM orders
-           WHERE telegram_id=? AND status='🚗 Выдан'
-           ORDER BY id''',
-        (user_id,),
-    )
-    completed_rows = cur.fetchall()
-    conn.close()
-
-    completed_amount = sum(parse_amount(row[0]) for row in completed_rows)
-    cashback_balance = sum(float(row[1] or 0) for row in completed_rows)
+    completed_amount = sum(max(0.0, parse_amount(r[6]) - get_order_spent(r[0])) for r in completed)
+    cashback_balance = get_balance(user_id)
     level_name, cashback_rate = get_level(completed_amount)
     next_level = get_next_level(completed_amount)
-
-    return (
-        len(active),
-        completed_amount,
-        len(completed),
-        cashback_balance,
-        level_name,
-        cashback_rate,
-        next_level,
-    )
+    return (len(active), completed_amount, len(completed), cashback_balance, level_name, cashback_rate, next_level)
 
 
 async def show_customer_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -66,7 +40,7 @@ async def show_customer_stats(update: Update, context: ContextTypes.DEFAULT_TYPE
         f'💰 Сумма покупок: {amount_text}\n\n'
         f'🏆 Уровень: {level_name}\n'
         f'💳 Кешбэк: {cashback_rate}%\n'
-        f'⭐ Начислено кешбэка: {cashback_text}'
+        f'⭐ Доступно кешбэка: {cashback_text}'
     )
 
     if next_level:
@@ -79,3 +53,4 @@ async def show_customer_stats(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await update.message.reply_text(text, reply_markup=profile_menu())
     return PROFILE_MENU
+

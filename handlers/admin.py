@@ -530,15 +530,20 @@ async def admin_message(update, context):
 
         try:
             from keyboards.keyboards import order_confirm_keyboard
+            from database.cashback import get_balance
+            from database.loyalty import parse_amount
+            balance = get_balance(row[1])
+            max_cashback = round(min(balance, parse_amount(text) * 0.5), 2)
             await context.bot.send_message(
                 chat_id=row[1],
                 text=(
                     f'💰 Предложение по заявке №{request_id}\n\n'
                     f'{text}\n\n'
-                    'Если всё устраивает, нажмите «Оформить заказ». ' 
-                    'Если предложение не подходит — нажмите «Отказаться». '
+                    + (f'💳 На вашей карте доступно {balance:,.2f} ₽.\n'
+                       f'Можно списать до {max_cashback:,.2f} ₽ (не более 50% заказа).\n\n'.replace(',', ' ') if max_cashback > 0 else '')
+                    + 'Если предложение устраивает, оформите заказ. При желании можно списать кешбэк.'
                 ),
-                reply_markup=order_confirm_keyboard(request_id),
+                reply_markup=order_confirm_keyboard(request_id, balance, max_cashback),
             )
         except Exception:
             await update.message.reply_text(
