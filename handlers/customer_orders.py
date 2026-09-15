@@ -1,7 +1,7 @@
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from database.orders import get_user_orders, get_order
+from database.orders import get_user_orders, get_order, cancel_order
 from database.requests import create_request
 from keyboards.keyboards import main_menu
 from states import MENU, ORDER_LIST, ORDER_DETAILS
@@ -82,7 +82,12 @@ async def send_order_details(update: Update, row):
     )
     if offer_text:
         text += f'\n\n💰 Цена / предложение:\n{offer_text}'
-    keyboard = [['🔄 Повторить заказ'], ['⬅️ К заказам']]
+    keyboard = []
+    if status not in ('❌ Отменён', '🚗 Выдан'):
+        keyboard.append(['❌ Отменить заказ'])
+    if status != '❌ Отменён':
+        keyboard.append(['🔄 Повторить заказ'])
+    keyboard.append(['⬅️ К заказам'])
     await update.message.reply_text(text, reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
 
 
@@ -91,6 +96,68 @@ async def order_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order_id = context.user_data.get('customer_order_id')
     if text == '⬅️ К заказам':
         return await show_orders(update, context)
+    if text == '❌ Отменить заказ':
+        if not order_id:
+            return ORDER_DETAILS
+        row = get_order(order_id)
+        if not row or row[2] != update.effective_user.id:
+            await update.message.reply_text('Заказ не найден.', reply_markup=main_menu())
+            return MENU
+        if row[3] in ('❌ Отменён', '🚗 Выдан'):
+            await update.message.reply_text(
+                'Этот заказ уже нельзя отменить.',
+                reply_markup=ReplyKeyboardMarkup([['⬅️ К заказам']], resize_keyboard=True),
+            )
+            return ORDER_DETAILS
+        context.user_data['confirm_cancel_order'] = True
+        await update.message.reply_text(
+            f'⚠️ Вы действительно хотите отменить заказ №{order_id}?',
+            reply_markup=ReplyKeyboardMarkup(
+                [['✅ Да, отменить'], ['↩️ Не отменять']],
+                resize_keyboard=True,
+            ),
+        )
+        return ORDER_DETAILS
+
+    if context.user_data.get('confirm_cancel_order'):
+        if text == '↩️ Не отменять':
+            context.user_data.pop('confirm_cancel_order', None)
+            row = get_order(order_id) if order_id else None
+            if row:
+                await send_order_details(update, row)
+            return ORDER_DETAILS
+        if text == '✅ Да, отменить':
+            context.user_data.pop('confirm_cancel_order', None)
+            ok, reason = cancel_order(order_id, update.effective_user.id)
+            if not ok:
+                await update.message.reply_text(
+                    'Заказ уже отменён или его больше нельзя отменить.',
+                    reply_markup=main_menu(),
+                )
+                return MENU
+
+            row = get_order(order_id)
+            try:
+                await context.bot.send_message(
+                    chat_id=OWNER_ID,
+                    text=(
+                        '❌ КЛИЕНТ ОТМЕНИЛ ЗАКАЗ\n\n'
+                        f'🛒 Заказ №{order_id}\n'
+                        f'👤 Клиент: {get_name(update.effective_user.id) or update.effective_user.full_name}\n'
+                        f'📱 Телефон: {row[13] or get_phone(update.effective_user.id) or "не указан"}\n'
+                        f'🚗 Автомобиль: {row[7]} {row[8]}'.strip()
+                    ),
+                )
+            except Exception:
+                pass
+            await update.message.reply_text(
+                f'❌ Заказ №{order_id} отменён.\n\nЕсли захотите оформить его снова, вы сможете повторить заказ.',
+                reply_markup=main_menu(),
+            )
+            context.user_data.clear()
+            return MENU
+        return ORDER_DETAILS
+
     if text == '🔄 Повторить заказ':
         row = get_order(order_id) if order_id else None
         if not row or row[2] != update.effective_user.id:

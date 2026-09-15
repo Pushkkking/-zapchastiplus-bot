@@ -137,3 +137,34 @@ def get_order_stats():
     cancelled = cur.fetchone()[0]
     conn.close()
     return total, new, work, ready, done, cancelled
+
+
+def cancel_order(order_id, user_id):
+    """Cancel a customer's order if it belongs to them and is still cancellable."""
+    now = _now()
+    conn = db()
+    cur = conn.cursor()
+    cur.execute(
+        '''SELECT status FROM orders WHERE id=? AND telegram_id=?''',
+        (order_id, user_id),
+    )
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return False, 'not_found'
+
+    status = row[0]
+    if status == '❌ Отменён':
+        conn.close()
+        return False, 'already_cancelled'
+    if status == '🚗 Выдан':
+        conn.close()
+        return False, 'already_issued'
+
+    cur.execute(
+        'UPDATE orders SET status=?,updated_at=? WHERE id=? AND telegram_id=?',
+        ('❌ Отменён', now, order_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+    return True, 'cancelled'

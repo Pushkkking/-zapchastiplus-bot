@@ -40,7 +40,7 @@ async def car_model(update,context):
 async def car_year(update,context):
     t=update.message.text.strip()
     if t=='⬅️ Назад': return await show_cars(update,context)
-    context.user_data['new_car']['year']='' if t=='Пропустить' else t; await update.message.reply_text('Введите VIN или номер кузова автомобиля.\n\nЕсли VIN/номер кузова неизвестен — нажмите «Пропустить». Для японских автомобилей можно указать номер кузова, даже если он короче 17 символов.',reply_markup=ReplyKeyboardMarkup([['Пропустить'],['⬅️ Назад']],resize_keyboard=True)); return CAR_VIN
+    context.user_data['new_car']['year']='' if t=='Пропустить' else t; await update.message.reply_text('Введите VIN или номер кузова автомобиля.\n\nЕсли VIN/номер кузова неизвестен — нажмите «Пропустить».',reply_markup=ReplyKeyboardMarkup([['Пропустить'],['⬅️ Назад']],resize_keyboard=True)); return CAR_VIN
 async def car_vin(update,context):
     t=update.message.text.strip().upper()
     if t=='⬅️ Назад': return await show_cars(update,context)
