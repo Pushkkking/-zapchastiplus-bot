@@ -20,4 +20,6 @@
     ADMIN_REQUEST_LIST,
     ADMIN_REQUEST_DETAILS,
     ADMIN_MESSAGE,
-) = range(21)
+    ORDER_LIST,
+    ORDER_DETAILS,
+) = range(23)

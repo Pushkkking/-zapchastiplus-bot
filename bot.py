@@ -24,6 +24,7 @@ from handlers.requests import (
     back_to_menu,
 )
 from handlers.orders import order_create_handler, order_decline_handler
+from handlers.customer_orders import order_list, order_details
 from handlers.admin import (
     admin_entry, admin_menu_handler, admin_request_or_order_list,
     admin_request_or_order_details, admin_message,
@@ -81,6 +82,15 @@ def main():
             REQUEST_LIST: [
                 MessageHandler(filters.Regex(r'^⬅️ Назад$'), back_to_menu),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, request_list),
+            ],
+            ORDER_LIST: [
+                MessageHandler(filters.Regex(r'^⬅️ Назад$'), order_list),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, order_list),
+            ],
+            ORDER_DETAILS: [
+                MessageHandler(filters.Regex(r'^⬅️ К заказам$'), order_details),
+                MessageHandler(filters.Regex(r'^🔄 Повторить заказ$'), order_details),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, order_details),
             ],
             REQUEST_DETAILS: [
                 MessageHandler(filters.Regex(r'^⬅️ К заявкам$'), request_details),

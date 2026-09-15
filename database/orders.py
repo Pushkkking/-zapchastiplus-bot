@@ -73,18 +73,19 @@ def get_order_by_request(request_id, user_id=None):
     return row
 
 
-def get_all_orders(status=None):
+def get_user_orders(user_id):
     conn = db()
     cur = conn.cursor()
-    base = '''SELECT
-        o.id,o.request_id,o.telegram_id,o.status,o.created_at,o.updated_at,o.offer_text,
-        r.make,r.model,r.year,r.request_text,r.phone
-    FROM orders o
-    JOIN requests r ON r.id=o.request_id'''
-    if status:
-        cur.execute(base + ' WHERE o.status=? ORDER BY o.id DESC', (status,))
-    else:
-        cur.execute(base + ' ORDER BY o.id DESC')
+    cur.execute(
+        '''SELECT
+            o.id,o.request_id,o.telegram_id,o.status,o.created_at,o.updated_at,o.offer_text,
+            r.make,r.model,r.year,r.vin,r.plate,r.request_text,r.phone
+        FROM orders o
+        JOIN requests r ON r.id=o.request_id
+        WHERE o.telegram_id=?
+        ORDER BY o.id DESC''',
+        (user_id,),
+    )
     rows = cur.fetchall()
     conn.close()
     return rows

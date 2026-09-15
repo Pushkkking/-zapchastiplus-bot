@@ -8,6 +8,8 @@ async def menu_handler(update,context):
         from handlers.requests import start_request; return await start_request(update,context)
     if text=='📋 Мои заявки':
         from handlers.requests import show_requests; return await show_requests(update,context)
+    if text=='🛒 Мои заказы':
+        from handlers.customer_orders import show_orders; return await show_orders(update,context)
     if text=='🚗 Мои автомобили':
         from handlers.cars import show_cars; return await show_cars(update,context)
     if text=='📱 Мой телефон':
