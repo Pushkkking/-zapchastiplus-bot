@@ -35,7 +35,7 @@ def admin_row_title(row):
 
 
 def admin_order_title(row):
-    order_id, request_id, user_id, status, created, updated, make, model, year, text, phone = row
+    order_id, request_id, user_id, status, created, updated, offer_text, make, model, year, text, phone = row
     car = f'{make} {model}'.strip() or 'Автомобиль'
     return f'🛒 №{order_id} — {car} — {status}'
 
@@ -281,7 +281,7 @@ async def admin_order_select(update, context):
 
 
 async def send_admin_order_details(update, row):
-    order_id, request_id, user_id, status, created, updated, make, model, year, vin, plate, request_text, phone = row
+    order_id, request_id, user_id, status, created, updated, offer_text, make, model, year, vin, plate, request_text, phone = row
     vehicle_lines = []
     for label, value in [('Марка', make), ('Модель', model), ('Год', year), ('VIN', vin), ('Госномер', plate)]:
         if value:
@@ -301,6 +301,7 @@ async def send_admin_order_details(update, row):
         f'💬 Telegram: {telegram_name}\n\n'
         f'🚗 АВТОМОБИЛЬ\n{vehicle}\n\n'
         f'🔧 ЧТО ЗАКАЗАНО:\n{request_text}'
+        + (f'\n\n💰 ЦЕНА / ПРЕДЛОЖЕНИЕ:\n{offer_text}' if offer_text else '\n\n💰 ЦЕНА / ПРЕДЛОЖЕНИЕ: не указано')
     )
     await update.message.reply_text(message, reply_markup=admin_order_actions())
 

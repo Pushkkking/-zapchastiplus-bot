@@ -71,6 +71,7 @@ def init_db():
     _add_column(cur, 'users', 'consent_at', 'TEXT')
     _add_column(cur, 'requests', 'updated_at', "TEXT NOT NULL DEFAULT ''")
     _add_column(cur, 'requests', 'offer_text', 'TEXT')
+    _add_column(cur, 'orders', 'offer_text', 'TEXT')
 
     conn.commit()
     conn.close()

@@ -2,7 +2,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import OWNER_ID
-from database.requests import get_request
+from database.requests import get_request, get_offer
 from database.orders import create_order, get_order_by_request
 from keyboards.keyboards import main_menu, order_confirm_keyboard
 from states import MENU
@@ -60,6 +60,7 @@ async def order_create_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     model = request[3]
     year = request[4]
     phone = request[8]
+    offer_text = get_offer(request_id)
     car = ' '.join(str(x) for x in [make, model, year] if x).strip() or 'автомобиль по VIN'
 
     try:
@@ -74,6 +75,7 @@ async def order_create_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 f'📱 Телефон: {phone or "не указан"}\n'
                 f'🚗 Автомобиль: {car}\n\n'
                 f'🔧 Что требуется: {request_text}'
+                + (f'\n\n💰 ЦЕНА / ПРЕДЛОЖЕНИЕ:\n{offer_text}' if offer_text else '\n\n💰 ЦЕНА / ПРЕДЛОЖЕНИЕ: не указано')
             ),
         )
     except Exception:

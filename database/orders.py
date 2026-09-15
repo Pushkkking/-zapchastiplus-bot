@@ -18,11 +18,16 @@ def create_order(request_id, telegram_id):
     if existing:
         conn.close()
         return existing[0], False
+
+    cur.execute('SELECT offer_text FROM requests WHERE id=?', (request_id,))
+    offer_row = cur.fetchone()
+    offer_text = offer_row[0] if offer_row else None
+
     cur.execute(
         '''INSERT INTO orders
-        (request_id,telegram_id,status,created_at,updated_at)
-        VALUES(?,?,?,?,?)''',
-        (request_id, telegram_id, '🆕 Новый', now, now),
+        (request_id,telegram_id,status,created_at,updated_at,offer_text)
+        VALUES(?,?,?,?,?,?)''',
+        (request_id, telegram_id, '🆕 Новый', now, now, offer_text),
     )
     order_id = cur.lastrowid
     conn.commit()
@@ -35,7 +40,7 @@ def get_order(order_id):
     cur = conn.cursor()
     cur.execute(
         '''SELECT
-            o.id,o.request_id,o.telegram_id,o.status,o.created_at,o.updated_at,
+            o.id,o.request_id,o.telegram_id,o.status,o.created_at,o.updated_at,o.offer_text,
             r.make,r.model,r.year,r.vin,r.plate,r.request_text,r.phone
         FROM orders o
         JOIN requests r ON r.id=o.request_id
@@ -50,26 +55,17 @@ def get_order(order_id):
 def get_order_by_request(request_id, user_id=None):
     conn = db()
     cur = conn.cursor()
+    base = '''SELECT
+        o.id,o.request_id,o.telegram_id,o.status,o.created_at,o.updated_at,o.offer_text,
+        r.make,r.model,r.year,r.vin,r.plate,r.request_text,r.phone
+    FROM orders o
+    JOIN requests r ON r.id=o.request_id
+    WHERE o.request_id=?'''
     if user_id is None:
-        cur.execute(
-            '''SELECT
-                o.id,o.request_id,o.telegram_id,o.status,o.created_at,o.updated_at,
-                r.make,r.model,r.year,r.vin,r.plate,r.request_text,r.phone
-            FROM orders o
-            JOIN requests r ON r.id=o.request_id
-            WHERE o.request_id=?
-            ORDER BY o.id DESC LIMIT 1''',
-            (request_id,),
-        )
+        cur.execute(base + ' ORDER BY o.id DESC LIMIT 1', (request_id,))
     else:
         cur.execute(
-            '''SELECT
-                o.id,o.request_id,o.telegram_id,o.status,o.created_at,o.updated_at,
-                r.make,r.model,r.year,r.vin,r.plate,r.request_text,r.phone
-            FROM orders o
-            JOIN requests r ON r.id=o.request_id
-            WHERE o.request_id=? AND o.telegram_id=?
-            ORDER BY o.id DESC LIMIT 1''',
+            base + ' AND o.telegram_id=? ORDER BY o.id DESC LIMIT 1',
             (request_id, user_id),
         )
     row = cur.fetchone()
@@ -81,7 +77,7 @@ def get_all_orders(status=None):
     conn = db()
     cur = conn.cursor()
     base = '''SELECT
-        o.id,o.request_id,o.telegram_id,o.status,o.created_at,o.updated_at,
+        o.id,o.request_id,o.telegram_id,o.status,o.created_at,o.updated_at,o.offer_text,
         r.make,r.model,r.year,r.request_text,r.phone
     FROM orders o
     JOIN requests r ON r.id=o.request_id'''
