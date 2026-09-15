@@ -26,6 +26,7 @@ from handlers.customer_cases import show_cases, case_list, case_details
 from handlers.orders import order_create_handler, order_decline_handler
 from handlers.customer_orders import order_list, order_details
 from handlers.customer_chat import start_customer_reply, receive_customer_message
+from handlers.customer_stats import show_customer_stats
 from handlers.admin import (
     admin_entry, admin_menu_handler, admin_request_or_order_list,
     admin_request_or_order_details, admin_message,
@@ -118,6 +119,13 @@ def main():
             ],
             DELETE_CAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, delete_car_handler)],
             EDIT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_name)],
+            PROFILE_MENU: [
+                MessageHandler(filters.Regex(r'^📊 Моя статистика$'), show_customer_stats),
+                MessageHandler(filters.Regex(r'^✏️ Изменить имя$'), edit_name),
+                MessageHandler(filters.Regex(r'^📱 Изменить телефон$'), edit_phone),
+                MessageHandler(filters.Regex(r'^⬅️ Назад$'), back_to_menu),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler),
+            ],
             EDIT_PHONE: [
                 MessageHandler(filters.CONTACT, edit_phone),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, edit_phone),

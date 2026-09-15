@@ -1,5 +1,6 @@
 from datetime import datetime
 from .db import db
+from .loyalty import parse_amount, calculate_cashback
 
 
 def _now():
@@ -112,9 +113,43 @@ def get_all_orders(status=None):
 def update_order_status(order_id, status):
     now = _now()
     conn = db()
-    conn.execute(
-        'UPDATE orders SET status=?,updated_at=? WHERE id=?',
-        (status, now, order_id),
+    cur = conn.cursor()
+
+    cur.execute(
+        'SELECT telegram_id, offer_text, status FROM orders WHERE id=?',
+        (order_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return
+
+    user_id, offer_text, old_status = row
+    cashback_amount = 0.0
+
+    if status == '🚗 Выдан' and old_status != '🚗 Выдан':
+        amount = parse_amount(offer_text)
+        cur.execute(
+            '''SELECT COALESCE(SUM(CASE WHEN status='🚗 Выдан' THEN
+                    CAST(CASE WHEN cashback_amount IS NULL THEN 0 ELSE cashback_amount END AS REAL) ELSE 0 END), 0)
+               FROM orders WHERE telegram_id=? AND id!=?''',
+            (user_id, order_id),
+        )
+        # Сумму покупок считаем по предложениям уже выданных заказов.
+        cur.execute(
+            '''SELECT offer_text FROM orders
+               WHERE telegram_id=? AND status='🚗 Выдан' AND id!=?
+               ORDER BY id''',
+            (user_id, order_id),
+        )
+        previous_amount = sum(parse_amount(r[0]) for r in cur.fetchall())
+        cashback_amount = calculate_cashback(previous_amount + amount, amount)
+    elif status != '🚗 Выдан':
+        cashback_amount = 0.0
+
+    cur.execute(
+        'UPDATE orders SET status=?,updated_at=?,cashback_amount=? WHERE id=?',
+        (status, now, cashback_amount, order_id),
     )
     conn.commit()
     conn.close()

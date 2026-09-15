@@ -23,4 +23,5 @@
     ORDER_LIST,
     ORDER_DETAILS,
     CUSTOMER_MESSAGE,
-) = range(24)
+    PROFILE_MENU,
+) = range(25)

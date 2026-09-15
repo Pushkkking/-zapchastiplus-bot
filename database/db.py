@@ -121,8 +121,27 @@ def init_db():
     _add_column(cur, 'requests', 'updated_at', "TEXT NOT NULL DEFAULT ''")
     _add_column(cur, 'requests', 'offer_text', 'TEXT')
     _add_column(cur, 'orders', 'offer_text', 'TEXT')
+    _add_column(cur, 'orders', 'cashback_amount', 'REAL NOT NULL DEFAULT 0')
     _add_column(cur, 'messages', 'message_type', "TEXT NOT NULL DEFAULT 'text'")
     _add_column(cur, 'messages', 'file_id', 'TEXT')
+
+    # Для уже выданных заказов один раз рассчитываем кешбэк задним числом.
+    # Расчёт идёт в хронологическом порядке по каждому клиенту.
+    from database.loyalty import parse_amount, calculate_cashback
+    cur.execute('''SELECT id, telegram_id, offer_text, created_at
+                   FROM orders
+                   WHERE status='🚗 Выдан'
+                   ORDER BY telegram_id, id''')
+    completed_by_user = {}
+    for order_id, user_id, offer_text, created_at in cur.fetchall():
+        if cur.execute('SELECT cashback_amount FROM orders WHERE id=?', (order_id,)).fetchone()[0]:
+            completed_by_user[user_id] = completed_by_user.get(user_id, 0) + parse_amount(offer_text)
+            continue
+        amount = parse_amount(offer_text)
+        before = completed_by_user.get(user_id, 0)
+        cashback = calculate_cashback(before + amount, amount)
+        cur.execute('UPDATE orders SET cashback_amount=? WHERE id=?', (cashback, order_id))
+        completed_by_user[user_id] = before + amount
 
     conn.commit()
     conn.close()

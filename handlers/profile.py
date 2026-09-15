@@ -2,11 +2,11 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from database.users import get_name,get_phone,save_name,save_phone
 from keyboards.keyboards import main_menu,back_keyboard,profile_menu
-from states import MENU,EDIT_NAME,EDIT_PHONE
+from states import MENU,EDIT_NAME,EDIT_PHONE,PROFILE_MENU
 
 async def show_my_data(update,context):
     uid=update.effective_user.id; name=get_name(uid); phone=get_phone(uid)
-    await update.message.reply_text(f'👤 Мои данные\n\nИмя: {name or "не указано"}\nТелефон: {phone or "не указан"}',reply_markup=profile_menu()); return MENU
+    await update.message.reply_text(f'👤 Мои данные\n\nИмя: {name or "не указано"}\nТелефон: {phone or "не указан"}',reply_markup=profile_menu()); return PROFILE_MENU
 
 async def edit_name(update,context):
     text=update.message.text.strip()

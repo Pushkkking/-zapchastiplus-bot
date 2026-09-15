@@ -1,6 +1,6 @@
 from database.users import get_name,get_phone
 from keyboards.keyboards import main_menu,back_keyboard
-from states import MENU,EDIT_NAME,EDIT_PHONE
+from states import MENU,EDIT_NAME,EDIT_PHONE,PROFILE_MENU
 
 async def menu_handler(update,context):
     text=update.message.text
@@ -16,8 +16,6 @@ async def menu_handler(update,context):
         from handlers.customer_chat import start_customer_message; return await start_customer_message(update,context)
     if text=='📖 История переписки':
         from handlers.customer_chat import show_chat_history; return await show_chat_history(update,context)
-    if text=='📊 Моя статистика':
-        from handlers.customer_stats import show_customer_stats; return await show_customer_stats(update,context)
     if text=='👤 Мои данные':
         from handlers.profile import show_my_data; return await show_my_data(update,context)
     if text=='✏️ Изменить имя':
