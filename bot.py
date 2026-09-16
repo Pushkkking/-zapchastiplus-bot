@@ -28,6 +28,7 @@ from handlers.customer_orders import order_list, order_details
 from handlers.customer_chat import start_customer_reply, receive_customer_message
 from handlers.customer_stats import show_customer_stats, show_bonus_history
 from handlers.customer_card import show_customer_card
+from handlers.customer_review import review_handler
 async def promo_add_command(update, context):
     from config import OWNER_ID
     if update.effective_user.id != OWNER_ID:
@@ -89,6 +90,7 @@ def main():
                 CallbackQueryHandler(promo_enter_handler, pattern=r'^promo_enter:\d+$'),
                 CallbackQueryHandler(show_bonus_history, pattern=r'^bonus_history$'),
                 CallbackQueryHandler(order_decline_handler, pattern=r'^order_decline:\d+$'),
+                CallbackQueryHandler(review_handler, pattern=r'^review:\d+:[1-5]$'),
                 CallbackQueryHandler(start_customer_reply, pattern=r'^customer_reply:(request|order|general):\d+$'),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler),
             ],

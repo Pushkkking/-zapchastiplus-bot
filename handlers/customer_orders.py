@@ -2,6 +2,7 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from database.orders import get_user_orders, get_order, cancel_order
+from database.cashback import get_order_spent, get_order_earned
 from database.requests import create_request
 from keyboards.keyboards import main_menu
 from states import MENU, ORDER_LIST, ORDER_DETAILS
@@ -76,12 +77,19 @@ async def send_order_details(update: Update, row):
     text = (
         f'🛒 Заказ №{order_id}\n\n'
         f'📅 Оформлен: {created}\n'
-        f'📌 Статус: {status}\n\n'
+        f'📌 Статус: {status}\n'
+        f'🕒 Последнее изменение: {updated}\n\n'
         f'🚗 Автомобиль:\n{vehicle}\n\n'
         f'🔧 Что заказано:\n{request_text}'
     )
     if offer_text:
         text += f'\n\n💰 Цена / предложение:\n{offer_text}'
+    spent = get_order_spent(order_id)
+    earned = get_order_earned(order_id)
+    if spent:
+        text += f'\n\n💳 Кешбэк списан: {spent:,.2f} ₽'.replace(',', ' ')
+    if earned:
+        text += f'\n⭐ Кешбэк начислен: {earned:,.2f} ₽'.replace(',', ' ')
     keyboard = []
     if status not in ('❌ Отменён', '🚗 Выдан'):
         keyboard.append(['❌ Отменить заказ'])

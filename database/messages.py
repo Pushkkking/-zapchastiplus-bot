@@ -11,9 +11,9 @@ def create_message(telegram_id, sender, text, request_id=None, order_id=None, me
     cur = conn.cursor()
     cur.execute(
         '''INSERT INTO messages
-        (telegram_id,sender,text,request_id,order_id,created_at)
-        VALUES(?,?,?,?,?,?)''',
-        (telegram_id, sender, text, request_id, order_id, _now()),
+        (telegram_id,sender,text,message_type,file_id,request_id,order_id,created_at)
+        VALUES(?,?,?,?,?,?,?,?)''',
+        (telegram_id, sender, text, message_type, file_id, request_id, order_id, _now()),
     )
     message_id = cur.lastrowid
     conn.commit()

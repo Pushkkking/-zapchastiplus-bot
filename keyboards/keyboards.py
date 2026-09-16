@@ -91,7 +91,7 @@ def order_confirm_keyboard(request_id, cashback_balance=0, max_cashback=0):
             callback_data=f'order_create:{request_id}:0',
         )],
         [InlineKeyboardButton(
-            '💬 Задать вопрос',
+            '💬 Написать нам',
             callback_data=f'customer_reply:request:{request_id}',
         )],
         [InlineKeyboardButton(

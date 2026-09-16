@@ -49,3 +49,11 @@ def get_transactions(user_id, limit=20):
                    WHERE telegram_id=?
                    ORDER BY id DESC LIMIT ?''', (user_id, limit))
     rows = cur.fetchall(); conn.close(); return rows
+
+
+def get_order_earned(order_id):
+    conn = db(); cur = conn.cursor()
+    cur.execute("SELECT COALESCE(SUM(amount), 0) FROM cashback_transactions WHERE order_id=? AND kind='earned'", (order_id,))
+    value = float(cur.fetchone()[0] or 0)
+    conn.close()
+    return round(max(0.0, value), 2)

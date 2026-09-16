@@ -6,6 +6,7 @@ from database.requests import get_all_requests, get_request, update_status, get_
 from database.orders import get_all_orders, get_order, update_order_status, get_order_stats
 from database.users import get_name, get_phone, get_username, get_all_users, get_user_summary
 from database.messages import create_message, get_user_messages, get_message_threads
+from database.reviews import get_review_stats
 from keyboards.keyboards import admin_menu, main_menu, admin_order_actions, admin_message_thread_actions
 from states import ADMIN_MENU, ADMIN_REQUEST_LIST, ADMIN_REQUEST_DETAILS, ADMIN_MESSAGE, MENU
 
@@ -88,6 +89,7 @@ async def admin_menu_handler(update, context):
     if text == '📊 Статистика':
         total, new, selecting, offer, done, cancelled = get_stats()
         ototal, onew, owork, oready, odone, ocancelled = get_order_stats()
+        review_count, review_avg = get_review_stats()
         await update.message.reply_text(
             '📊 Статистика\n\n'
             'ЗАЯВКИ\n'
@@ -103,7 +105,10 @@ async def admin_menu_handler(update, context):
             f'🔧 В работе: {owork}\n'
             f'📦 Готов к выдаче: {oready}\n'
             f'🚗 Выдан: {odone}\n'
-            f'❌ Отменён: {ocancelled}',
+            f'❌ Отменён: {ocancelled}\n\n'
+            'ОТЗЫВЫ\n'
+            f'⭐ Оценок: {review_count}\n'
+            f'⭐ Средняя оценка: {review_avg if review_count else "—"}',
             reply_markup=admin_menu(),
         )
         return ADMIN_MENU
@@ -470,18 +475,32 @@ async def admin_order_details(update, context):
             await update.message.reply_text('Заказ не найден.')
             return ADMIN_REQUEST_LIST
         await send_admin_order_details(update, row)
+        notification_ok = True
         try:
+            from keyboards.keyboards import customer_reply_keyboard
             await context.bot.send_message(
                 chat_id=row[2],
                 text=(
                     f'🛒 По вашему заказу №{order_id} изменился статус:\n\n'
-                    f'{new_status}'
+                    f'{new_status}\n\n'
+                    'Если хотите что-то уточнить, напишите нам.'
                 ),
+                reply_markup=customer_reply_keyboard(order_id=order_id),
             )
+            if new_status == '🚗 Выдан':
+                from handlers.customer_review import review_keyboard
+                await context.bot.send_message(
+                    chat_id=row[2],
+                    text=(f'⭐ Заказ №{order_id} выдан. Спасибо за покупку!\n\n'
+                          'Оцените, пожалуйста, как всё прошло:'),
+                    reply_markup=review_keyboard(order_id),
+                )
         except Exception:
-            await update.message.reply_text(
-                '⚠️ Статус изменён, но уведомление клиенту отправить не удалось.'
-            )
+            notification_ok = False
+            import logging
+            logging.getLogger(__name__).exception('Не удалось отправить уведомление по заказу %s', order_id)
+        if not notification_ok:
+            await update.message.reply_text('⚠️ Статус изменён, но уведомление клиенту отправить не удалось.')
         return ADMIN_REQUEST_DETAILS
 
     if text == '💬 Написать клиенту':

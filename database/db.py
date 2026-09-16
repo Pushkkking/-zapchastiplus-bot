@@ -148,6 +148,14 @@ def init_db():
         created_at TEXT NOT NULL
     )''')
 
+    cur.execute('''CREATE TABLE IF NOT EXISTS reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER NOT NULL,
+        order_id INTEGER NOT NULL UNIQUE,
+        rating INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+    )''')
+
     # Миграции существующей БД.
     _add_column(cur, 'users', 'telegram_name', 'TEXT')
     _add_column(cur, 'users', 'name', 'TEXT')
