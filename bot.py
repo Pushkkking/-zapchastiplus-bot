@@ -167,7 +167,9 @@ def main():
             ],
             CUSTOMER_MESSAGE: [
                 MessageHandler(filters.Regex(r'^⬅️ Назад$'), cancel),
-                MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, receive_customer_message),
+                MessageHandler(filters.PHOTO & ~filters.COMMAND, receive_customer_message),
+                MessageHandler(filters.Document.ALL & ~filters.COMMAND, receive_customer_message),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_customer_message),
             ],
             ADMIN_MENU: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, admin_menu_handler),
@@ -185,6 +187,11 @@ def main():
         fallbacks=[CommandHandler('cancel', cancel), CommandHandler('promoadd', promo_add_command)],
     )
 
+    # Эти callback-и должны работать независимо от текущего состояния клиента.
+    # Например, отзыв может прийти сразу после выдачи заказа, когда клиент находится
+    # не в MENU, а история бонусов открывается из карточки.
+    app.add_handler(CallbackQueryHandler(review_handler, pattern=r'^review:\d+:[1-5]$'))
+    app.add_handler(CallbackQueryHandler(show_bonus_history, pattern=r'^bonus_history$'))
     app.add_handler(conv)
     print('Бот запущен...')
     app.run_polling()

@@ -98,6 +98,27 @@ async def start_customer_reply(update, context):
     return CUSTOMER_MESSAGE
 
 
+async def show_chat_history(update, context):
+    """Показать клиенту историю переписки. Работает из обычной кнопки меню."""
+    user_id = update.effective_user.id
+    rows = get_user_messages(user_id, limit=30)
+    if not rows:
+        text = '📖 История переписки\n\nПереписка пока пуста.'
+    else:
+        parts = ['📖 История переписки', '']
+        for _, sender, message_text, message_type, file_id, request_id, order_id, created_at in rows:
+            who = 'Вы' if sender == 'customer' else 'Запчасти+'
+            context_line = f' · заказ №{order_id}' if order_id else (f' · заявка №{request_id}' if request_id else '')
+            prefix = '📷 ' if message_type == 'photo' else ('📎 ' if message_type == 'document' else '')
+            parts.append(f'[{created_at}] {who}{context_line}:\n{prefix}{message_text}')
+        text = '\n\n'.join(parts)
+    # Telegram ограничивает обычное сообщение 4096 символами.
+    if len(text) > 3900:
+        text = '📖 История переписки\n\n…\n\n' + text[-3900:]
+    await update.message.reply_text(text, reply_markup=chat_keyboard())
+    return MENU
+
+
 async def receive_customer_message(update, context):
     user_id = update.effective_user.id
     request_id = context.user_data.get('customer_message_request_id')
