@@ -6,6 +6,7 @@ from states import MENU,EDIT_NAME,EDIT_PHONE,PROFILE_MENU,PROMO_CODE,BIRTHDAY
 
 async def show_my_data(update,context):
     uid=update.effective_user.id; name=get_name(uid); phone=get_phone(uid); birthday=get_birthday(uid)
+    onboarding = context.user_data.get('onboarding_birthday', False)
     birthday_text = ''
     if birthday:
         try:

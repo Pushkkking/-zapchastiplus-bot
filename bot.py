@@ -15,7 +15,7 @@ from config import BOT_TOKEN
 from database.db import init_db
 from handlers.start import start, receive_name, consent_handler, cancel
 from handlers.menu import menu_handler
-from handlers.profile import edit_name, edit_phone, start_edit_data, show_referral, start_promo_from_profile
+from handlers.profile import edit_name, edit_phone, start_edit_data, show_referral, start_promo_from_profile, start_birthday, save_birthday_handler
 from handlers.cars import (
     show_cars, add_car_start, car_make, car_model, car_year, car_photo_from_make,
     car_vin, car_vin_photo, car_plate, delete_car_start, delete_car_handler, car_back, car_photo_confirm,
