@@ -16,7 +16,7 @@ from handlers.menu import menu_handler
 from handlers.profile import edit_name, edit_phone, start_edit_data, show_referral, start_promo_from_profile
 from handlers.cars import (
     show_cars, add_car_start, car_make, car_model, car_year,
-    car_vin, car_plate, delete_car_start, delete_car_handler, car_back,
+    car_vin, car_vin_photo, car_plate, delete_car_start, delete_car_handler, car_back, car_photo_confirm,
 )
 from handlers.requests import (
     start_request, request_car, request_vin, request_text,
@@ -25,7 +25,7 @@ from handlers.requests import (
 from handlers.customer_cases import show_cases, case_list, case_details
 from handlers.orders import order_create_handler, order_decline_handler, cashback_use_handler, promo_enter_handler, promo_apply_handler
 from handlers.customer_orders import order_list, order_details
-from handlers.customer_chat import start_customer_reply, receive_customer_message
+from handlers.customer_chat import start_customer_reply, start_customer_message, show_chat_history, receive_customer_message
 from handlers.customer_stats import show_customer_stats, show_bonus_history
 from handlers.customer_card import show_customer_card
 from handlers.customer_review import review_handler
@@ -92,6 +92,8 @@ def main():
                 CallbackQueryHandler(order_decline_handler, pattern=r'^order_decline:\d+$'),
                 CallbackQueryHandler(review_handler, pattern=r'^review:\d+:[1-5]$'),
                 CallbackQueryHandler(start_customer_reply, pattern=r'^customer_reply:(request|order|general):\d+$'),
+                MessageHandler(filters.Regex(r'^💬 Написать сообщение$'), start_customer_message),
+                MessageHandler(filters.Regex(r'^📖 История переписки$'), show_chat_history),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler),
             ],
             REQUEST_CAR: [
@@ -139,7 +141,9 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, car_year),
             ],
             CAR_VIN: [
+                CallbackQueryHandler(car_photo_confirm, pattern=r'^car_photo_confirm:(yes|no)$'),
                 MessageHandler(filters.Regex(r'^(?:⬅️\s*)?Назад$'), car_back),
+                MessageHandler(filters.PHOTO & ~filters.COMMAND, car_vin_photo),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, car_vin),
             ],
             CAR_PLATE: [

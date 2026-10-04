@@ -21,6 +21,19 @@ def chat_keyboard():
     ], resize_keyboard=True)
 
 
+async def start_customer_message(update, context):
+    """Start a general customer-to-owner conversation from the chat menu."""
+    context.user_data['customer_message_request_id'] = None
+    context.user_data['customer_message_order_id'] = None
+    await update.message.reply_text(
+        '💬 Напишите ваш вопрос или сообщение для «Запчасти+».\n\n'
+        'Можно отправить текст, фотографию или файл.\n\n'
+        'Для отмены нажмите «⬅️ Назад».',
+        reply_markup=ReplyKeyboardMarkup([['⬅️ Назад']], resize_keyboard=True),
+    )
+    return CUSTOMER_MESSAGE
+
+
 async def show_chat(update, context):
     await update.message.reply_text(
         '💬 Связаться с «Запчасти+»\n\n'
