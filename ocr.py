@@ -1,8 +1,4 @@
-"""OCR helpers for VIN / license-plate photos.
-
-Uses OpenAI Responses API with an image-capable model. The API key is read from
-OPENAI_API_KEY; no key is stored in the repository.
-"""
+"""Vehicle document/photo recognition via OpenAI Responses API."""
 import base64
 import json
 import os
@@ -10,9 +6,23 @@ import re
 import urllib.error
 import urllib.request
 
-
 OPENAI_API_URL = "https://api.openai.com/v1/responses"
-DEFAULT_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4.1-mini")
+DEFAULT_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
+
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "vin": {"type": "string"},
+        "plate": {"type": "string"},
+        "make": {"type": "string"},
+        "model": {"type": "string"},
+        "year": {"type": "string"},
+        "confidence": {"type": "number"},
+        "raw_text": {"type": "string"},
+    },
+    "required": ["vin", "plate", "make", "model", "year", "confidence", "raw_text"],
+    "additionalProperties": False,
+}
 
 
 def _extract_json(text: str) -> dict:
@@ -32,10 +42,12 @@ def _extract_json(text: str) -> dict:
 def _normalise_vin(value):
     if not value:
         return ""
-    value = re.sub(r"[^A-Za-z0-9]", "", str(value)).upper()
-    # VINs do not contain I, O or Q. OCR frequently confuses these with 1/0.
-    value = value.replace("О", "O").replace("О", "O")
-    return value
+    value = str(value).upper().replace("О", "O")
+    value = re.sub(r"[^A-Z0-9]", "", value)
+    # Never silently invent a VIN. A valid VIN has 17 characters and no I/O/Q.
+    if len(value) == 17 and not any(ch in value for ch in "IOQ"):
+        return value
+    return value if 3 <= len(value) <= 30 else ""
 
 
 def _normalise_plate(value):
@@ -44,76 +56,110 @@ def _normalise_plate(value):
     return re.sub(r"\s+", " ", str(value).strip().upper())
 
 
+def _normalise_year(value):
+    if not value:
+        return ""
+    m = re.search(r"\b(19\d{2}|20\d{2}|21\d{2})\b", str(value))
+    return m.group(1) if m else ""
+
+
+def _call(image_data_url, api_key, model, structured=True):
+    prompt = """
+Ты распознаёшь данные автомобиля на фотографии СТС, другого автомобильного документа,
+VIN-таблички или фотографии VIN под лобовым стеклом.
+
+Верни данные только по тому, что реально видно на фотографии. Ничего не придумывай.
+Если поле не видно или есть сомнение — верни пустую строку.
+
+Нужно определить:
+- vin — VIN автомобиля, обычно 17 символов;
+- plate — государственный регистрационный номер;
+- make — марка автомобиля;
+- model — модель автомобиля;
+- year — год выпуска автомобиля;
+- confidence — общая уверенность от 0 до 100;
+- raw_text — другой полезный текст, который удалось прочитать.
+
+Если это СТС, особенно внимательно ищи марку, модель, год, VIN и госномер в соответствующих полях документа.
+Не путай VIN с номером документа, серийным номером, номером кузова другого объекта или артикулом.
+""".strip()
+
+    payload = {
+        "model": model,
+        "input": [{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": prompt},
+                {"type": "input_image", "image_url": image_data_url, "detail": "high"},
+            ],
+        }],
+    }
+    if structured:
+        payload["text"] = {
+            "format": {
+                "type": "json_schema",
+                "name": "vehicle_data",
+                "strict": True,
+                "schema": SCHEMA,
+            }
+        }
+    else:
+        payload["text"] = {"format": {"type": "json_object"}}
+
+    req = urllib.request.Request(
+        OPENAI_API_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=75) as response:
+        body = response.read().decode("utf-8")
+    result = json.loads(body)
+    return _extract_json(result.get("output_text", ""))
+
+
 def recognise_vehicle_data(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
-    """Return {vin, plate, make, model, confidence, raw_text} from a photo."""
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY не задан в Railway Variables")
 
     data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
-    prompt = """
-Ты распознаёшь данные автомобиля на фотографии для автосервиса.
-Нужно внимательно прочитать именно визуально видимые данные и вернуть ТОЛЬКО JSON.
+    errors = []
+    models = [DEFAULT_MODEL]
+    if DEFAULT_MODEL != "gpt-4o-mini":
+        models.append("gpt-4o-mini")
 
-Поля JSON:
-{
-  "vin": "VIN или пустая строка",
-  "plate": "госномер или пустая строка",
-  "make": "марка, если явно видна, иначе пустая строка",
-  "model": "модель, если явно видна, иначе пустая строка",
-  "year": "год выпуска, если явно указан на документе/фото, иначе пустая строка",
-  "confidence": 0-100,
-  "raw_text": "другой полезный текст с фото"
-}
+    data = {}
+    for model in models:
+        try:
+            data = _call(data_url, api_key, model, structured=True)
+            if data:
+                break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:800]
+            errors.append(f"{model}: HTTP {exc.code}: {detail}")
+        except Exception as exc:
+            errors.append(f"{model}: {exc}")
 
-Правила:
-- VIN обычно 17 символов; не придумывай отсутствующие символы.
-- Госномер возвращай в читаемом виде, без выдумывания региона.
-- Если символ сомнителен, лучше оставить поле пустым, чем угадывать.
-- Не путай номер детали, серийный номер или артикул с VIN.
-- Не считай штрихкод VIN, если сам VIN текстом не виден.
-- Если на фото СТС есть поле «Год выпуска» — извлеки именно его.
-- Если на фото виден только VIN без марки/модели/года, не угадывай эти поля по одному VIN.
-- Если марка/модель явно указаны в СТС, извлеки их.
-""".strip()
+    # Last fallback for an account/model combination where Structured Outputs is unavailable.
+    if not data:
+        try:
+            data = _call(data_url, api_key, DEFAULT_MODEL, structured=False)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:800]
+            errors.append(f"fallback: HTTP {exc.code}: {detail}")
+        except Exception as exc:
+            errors.append(f"fallback: {exc}")
 
-    payload = {
-        "model": DEFAULT_MODEL,
-        "input": [{
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": prompt},
-                {"type": "input_image", "image_url": data_url, "detail": "high"},
-            ],
-        }],
-    }
-    req = urllib.request.Request(
-        OPENAI_API_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as response:
-            body = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:500]
-        raise RuntimeError(f"Ошибка OCR API ({exc.code}): {detail}") from exc
-    except Exception as exc:
-        raise RuntimeError(f"Не удалось выполнить OCR: {exc}") from exc
+    if not data:
+        raise RuntimeError("; ".join(errors) or "Пустой ответ OCR API")
 
-    result = json.loads(body)
-    text = result.get("output_text", "")
-    data = _extract_json(text)
     return {
         "vin": _normalise_vin(data.get("vin")),
         "plate": _normalise_plate(data.get("plate")),
         "make": str(data.get("make") or "").strip(),
         "model": str(data.get("model") or "").strip(),
-        "year": str(data.get("year") or "").strip(),
-        "confidence": data.get("confidence", 0),
+        "year": _normalise_year(data.get("year")),
+        "confidence": max(0, min(100, float(data.get("confidence") or 0))),
         "raw_text": str(data.get("raw_text") or "").strip(),
     }

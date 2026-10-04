@@ -67,7 +67,7 @@ async def show_bonus_history(update, context):
         text = '📜 История бонусов\n\nПока операций нет.'
     else:
         parts = ['📜 История бонусов', '']
-        for amount, kind, order_id, note, created_at in rows:
+        for amount, kind, order_id, note, created_at, expires_at in rows:
             sign = '+' if amount > 0 else ''
             label = note or {
                 'earned': 'Начисление кешбэка',
@@ -75,7 +75,13 @@ async def show_bonus_history(update, context):
                 'refund': 'Возврат кешбэка',
             }.get(kind, kind)
             order = f' · заказ №{order_id}' if order_id else ''
-            parts.append(f'{sign}{amount:,.2f} ₽ — {label}{order}\n{created_at}'.replace(',', ' '))
+            expiry = ''
+            if kind == 'birthday' and expires_at:
+                try:
+                    expiry = f'\n⏳ Действует до {expires_at[:10]}'
+                except Exception:
+                    pass
+            parts.append(f'{sign}{amount:,.2f} ₽ — {label}{order}{expiry}\n{created_at}'.replace(',', ' '))
         text = '\n'.join(parts)
 
     if update.callback_query:

@@ -59,6 +59,14 @@ def save_phone(user_id, phone):
     conn=db(); conn.execute('UPDATE users SET phone=? WHERE telegram_id=?',(phone,user_id)); conn.commit(); conn.close()
 
 
+
+def get_birthday(user_id):
+    conn=db(); cur=conn.cursor(); cur.execute('SELECT birthday FROM users WHERE telegram_id=?',(user_id,)); row=cur.fetchone(); conn.close()
+    return row[0] if row and row[0] else None
+
+def save_birthday(user_id, birthday):
+    conn=db(); conn.execute('UPDATE users SET birthday=? WHERE telegram_id=?',(birthday,user_id)); conn.commit(); conn.close()
+
 def get_username(user_id):
     conn=db(); cur=conn.cursor(); cur.execute('SELECT username FROM users WHERE telegram_id=?',(user_id,)); row=cur.fetchone(); conn.close()
     return row[0] if row and row[0] else None

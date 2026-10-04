@@ -25,4 +25,5 @@
     CUSTOMER_MESSAGE,
     PROFILE_MENU,
     PROMO_CODE,
+    BIRTHDAY,
 ) = range(26)

@@ -8,7 +8,9 @@ def _now():
 
 def get_balance(user_id):
     conn = db(); cur = conn.cursor()
-    cur.execute('SELECT COALESCE(SUM(amount), 0) FROM cashback_transactions WHERE telegram_id=?', (user_id,))
+    now = datetime.now().isoformat(timespec='seconds')
+    cur.execute('''SELECT COALESCE(SUM(amount), 0) FROM cashback_transactions
+                   WHERE telegram_id=? AND (expires_at IS NULL OR expires_at > ?)''', (user_id, now))
     value = float(cur.fetchone()[0] or 0)
     conn.close()
     return round(max(0.0, value), 2)
@@ -19,8 +21,8 @@ def add_transaction(user_id, amount, kind, order_id=None, note=None):
         return
     conn = db(); cur = conn.cursor()
     cur.execute('''INSERT INTO cashback_transactions
-        (telegram_id, order_id, amount, kind, note, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)''',
+        (telegram_id, order_id, amount, kind, note, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, NULL)''',
         (user_id, order_id, round(float(amount), 2), kind, note, _now()))
     conn.commit(); conn.close()
 
@@ -44,7 +46,7 @@ def has_transaction(order_id, kind):
 
 def get_transactions(user_id, limit=20):
     conn = db(); cur = conn.cursor()
-    cur.execute('''SELECT amount, kind, order_id, note, created_at
+    cur.execute('''SELECT amount, kind, order_id, note, created_at, expires_at
                    FROM cashback_transactions
                    WHERE telegram_id=?
                    ORDER BY id DESC LIMIT ?''', (user_id, limit))

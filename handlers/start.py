@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from config import OWNER_ID
@@ -10,9 +10,10 @@ from database.users import (
     save_consent,
     save_name,
     get_user_by_card_token,
+    get_birthday,
 )
 from keyboards.keyboards import main_menu, consent_keyboard, admin_menu
-from states import CONSENT, NAME, MENU, ADMIN_MENU
+from states import CONSENT, NAME, MENU, ADMIN_MENU, BIRTHDAY
 
 
 async def show_consent(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -51,6 +52,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from database.orders import get_user_orders
         from database.cashback import get_order_spent
         customer_id, customer_name, phone, username, card_number = customer
+        from database.users import get_birthday
+        customer_birthday = get_birthday(customer_id)
         total = sum(max(0.0, parse_amount(r[6]) - get_order_spent(r[0])) for r in get_user_orders(customer_id) if r[3] == '🚗 Выдан')
         level_name, rate = get_level(total)
         balance = get_balance(customer_id)
@@ -77,6 +80,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'Напишите ваше имя:'
         )
         return NAME
+
+    if not get_birthday(user.id):
+        context.user_data['onboarding_birthday'] = True
+        await update.message.reply_text(
+            '🎂 Хотите получить 1 000 ₽ бонусами в день рождения?\n\n'
+            'Укажите дату рождения в формате ДД.ММ.ГГГГ.\n'
+            'Бонус действует 14 дней.',
+            reply_markup=ReplyKeyboardMarkup([['Пропустить'], ['⬅️ Назад']], resize_keyboard=True),
+        )
+        return BIRTHDAY
 
     await update.message.reply_text(
         f'Здравствуйте, {name}! 👋\n\n'
@@ -117,6 +130,19 @@ async def consent_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return NAME
 
+    if not get_birthday(user.id):
+        context.user_data['onboarding_birthday'] = True
+        await query.edit_message_text(
+            'Спасибо! Согласие сохранено.\n\n'
+            '🎂 Укажите дату рождения в формате ДД.ММ.ГГГГ.\n'
+            'В ваш день рождения начислим 1 000 ₽ бонусами на 14 дней.'
+        )
+        await update.effective_chat.send_message(
+            'Введите дату рождения или нажмите «Пропустить».',
+            reply_markup=ReplyKeyboardMarkup([['Пропустить'], ['⬅️ Назад']], resize_keyboard=True),
+        )
+        return BIRTHDAY
+
     await query.edit_message_text(
         f'Спасибо! Согласие сохранено.\n\n'
         f'Здравствуйте, {name}! 👋'
@@ -135,12 +161,14 @@ async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return NAME
 
     save_name(update.effective_user.id, name)
+    context.user_data['onboarding_birthday'] = True
     await update.message.reply_text(
         f'Очень приятно, {name}! 👋\n\n'
-        'Теперь выберите нужное действие:',
-        reply_markup=main_menu(),
+        '🎂 Укажите дату рождения в формате ДД.ММ.ГГГГ.\n'
+        'В ваш день рождения бот начислит 1 000 ₽ бонусами на 14 дней.',
+        reply_markup=ReplyKeyboardMarkup([['Пропустить'], ['⬅️ Назад']], resize_keyboard=True),
     )
-    return MENU
+    return BIRTHDAY
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):

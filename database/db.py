@@ -66,7 +66,9 @@ def init_db():
         consent_given INTEGER NOT NULL DEFAULT 0,
         consent_at TEXT,
         card_token TEXT UNIQUE,
-        card_number TEXT UNIQUE
+        card_number TEXT UNIQUE,
+        birthday TEXT,
+        birthday_bonus_year INTEGER
     )''')
 
     cur.execute('''CREATE TABLE IF NOT EXISTS cars (
@@ -112,7 +114,8 @@ def init_db():
         amount REAL NOT NULL,
         kind TEXT NOT NULL,
         note TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        expires_at TEXT
     )''')
 
 
@@ -163,6 +166,8 @@ def init_db():
     _add_column(cur, 'users', 'consent_at', 'TEXT')
     _add_column(cur, 'users', 'card_token', 'TEXT')
     _add_column(cur, 'users', 'card_number', 'TEXT')
+    _add_column(cur, 'users', 'birthday', 'TEXT')
+    _add_column(cur, 'users', 'birthday_bonus_year', 'INTEGER')
     _add_column(cur, 'users', 'referral_code', 'TEXT')
     _add_column(cur, 'users', 'referred_by', 'INTEGER')
     _add_column(cur, 'users', 'referral_rewarded', 'INTEGER NOT NULL DEFAULT 0')
@@ -174,6 +179,7 @@ def init_db():
     _add_column(cur, 'orders', 'promo_discount', 'REAL NOT NULL DEFAULT 0')
     _add_column(cur, 'messages', 'message_type', "TEXT NOT NULL DEFAULT 'text'")
     _add_column(cur, 'messages', 'file_id', 'TEXT')
+    _add_column(cur, 'cashback_transactions', 'expires_at', 'TEXT')
 
     # Для уже выданных заказов один раз рассчитываем кешбэк задним числом.
     # Расчёт идёт в хронологическом порядке по каждому клиенту.

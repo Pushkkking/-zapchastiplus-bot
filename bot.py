@@ -1,5 +1,7 @@
 import logging
 
+from datetime import datetime, time, timezone
+
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -63,12 +65,35 @@ logging.basicConfig(
 )
 
 
+
+async def birthday_bonus_job(context):
+    from database.birthday import users_with_birthday_today, award_birthday_bonus, BIRTHDAY_BONUS, BIRTHDAY_BONUS_DAYS
+    today = datetime.now(timezone.utc).date()
+    for user_id, name, birthday in users_with_birthday_today(today):
+        try:
+            awarded, expires = award_birthday_bonus(user_id, today.year)
+            if awarded:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=(
+                        '🎂 С днём рождения! 🎉\n\n'
+                        f"Мы начислили вам {BIRTHDAY_BONUS:,.0f} ₽ бонусами в подарок.\n".replace(',', ' ') +
+                        f'Бонусы действуют {BIRTHDAY_BONUS_DAYS} дней — до {expires.strftime("%d.%m.%Y")}.\n\n'
+                        'Использовать их можно при оформлении заказа.'
+                    ),
+                )
+        except Exception:
+            logging.exception('Birthday bonus failed for user %s', user_id)
+
 def main():
     init_db()
     if not BOT_TOKEN:
         raise ValueError('Не найдена переменная BOT_TOKEN в Railway.')
 
     app = Application.builder().token(BOT_TOKEN).build()
+    # Railway runs in UTC; 05:00 UTC = 09:00 in Tolyatti/Samara.
+    if app.job_queue:
+        app.job_queue.run_daily(birthday_bonus_job, time=time(hour=5, minute=0, tzinfo=timezone.utc), name='birthday_bonus')
 
     conv = ConversationHandler(
         entry_points=[
@@ -164,8 +189,12 @@ def main():
                 MessageHandler(filters.Regex(r'^👥 Пригласить друга$'), show_referral),
                 MessageHandler(filters.Regex(r'^🎟 Промокод$'), start_promo_from_profile),
                 MessageHandler(filters.Regex(r'^✏️ Изменить данные$'), start_edit_data),
+                MessageHandler(filters.Regex(r'^🎂 День рождения$'), start_birthday),
                 MessageHandler(filters.Regex(r'^⬅️ Назад$'), back_to_menu),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler),
+            ],
+            BIRTHDAY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, save_birthday_handler),
             ],
             PROMO_CODE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, promo_apply_handler),
