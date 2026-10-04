@@ -26,4 +26,4 @@
     PROFILE_MENU,
     PROMO_CODE,
     BIRTHDAY,
-) = range(26)
+) = range(27)
