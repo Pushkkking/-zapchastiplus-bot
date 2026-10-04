@@ -18,9 +18,16 @@ def title(car):
     return f'{label} — номер не указан'
 
 
+def photo_keyboard():
+    return ReplyKeyboardMarkup(
+        [['📷 Сфотографировать СТС / VIN'], ['⬅️ Назад']],
+        resize_keyboard=True,
+    )
+
+
 def vin_keyboard():
     return ReplyKeyboardMarkup(
-        [['📷 Сфотографировать VIN'], ['Пропустить'], ['⬅️ Назад']],
+        [['📷 Сфотографировать СТС / VIN'], ['Пропустить'], ['⬅️ Назад']],
         resize_keyboard=True,
     )
 
@@ -45,7 +52,25 @@ async def show_cars(update,context):
     await update.message.reply_text('Ваши автомобили:',reply_markup=ReplyKeyboardMarkup(kb,resize_keyboard=True)); return MENU
 
 async def add_car_start(update,context):
-    context.user_data['new_car']={}; await update.message.reply_text('Введите марку автомобиля:',reply_markup=back_keyboard()); return CAR_MAKE
+    context.user_data['new_car']={}
+    await update.message.reply_text(
+        'Добавление автомобиля.\n\n'
+        'Можно ввести данные вручную или сразу отправить фотографию СТС / VIN.\n'
+        'По фотографии бот попробует определить марку, модель, год, VIN и госномер.',
+        reply_markup=photo_keyboard(),
+    )
+    return CAR_MAKE
+async def car_photo_from_make(update, context):
+    if update.message.text.strip() == '📷 Сфотографировать СТС / VIN':
+        await update.message.reply_text(
+            '📷 Отправьте фотографию СТС или VIN-таблички.\n\n'
+            'Лучше сфотографировать документ целиком и без бликов. На фото должны быть хорошо видны поля с маркой, моделью, годом, VIN и госномером (если они есть).',
+            reply_markup=ReplyKeyboardMarkup([['⬅️ Назад']], resize_keyboard=True),
+        )
+        return CAR_VIN
+    return await car_make(update, context)
+
+
 async def car_make(update,context):
     t=update.message.text.strip()
     if t=='⬅️ Назад': return await show_cars(update,context)
@@ -83,6 +108,7 @@ async def car_vin_photo(update, context):
     lines = ['🔎 Результат распознавания:\n']
     lines.append(f"VIN: {result['vin'] or 'не распознан'}")
     lines.append(f"Госномер: {result['plate'] or 'не распознан'}")
+    lines.append(f"Год: {result.get('year') or 'не распознан'}")
     if result.get('make'):
         lines.append(f"Марка: {result['make']}")
     if result.get('model'):
@@ -107,6 +133,8 @@ async def car_photo_confirm(update, context):
         car['make'] = result['make']
     if result.get('model') and not car.get('model'):
         car['model'] = result['model']
+    if result.get('year') and not car.get('year'):
+        car['year'] = result['year']
     car['vin'] = result.get('vin', '')
     car['plate'] = result.get('plate', '')
     if not car.get('vin') and not car.get('plate'):
@@ -123,7 +151,7 @@ async def car_photo_confirm(update, context):
 async def car_vin(update,context):
     t=update.message.text.strip().upper()
     if t=='⬅️ Назад': return await show_cars(update,context)
-    if t=='📷 СФОТОГРАФИРОВАТЬ VIN'.upper():
+    if t=='📷 СФОТОГРАФИРОВАТЬ СТС / VIN'.upper():
         await update.message.reply_text('📷 Отправьте фотографию VIN-таблички, VIN под лобовым стеклом или документа, где хорошо виден VIN и госномер.')
         return CAR_VIN
     if t=='Пропустить': t=''

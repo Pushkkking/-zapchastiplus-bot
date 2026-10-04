@@ -15,7 +15,7 @@ from handlers.start import start, receive_name, consent_handler, cancel
 from handlers.menu import menu_handler
 from handlers.profile import edit_name, edit_phone, start_edit_data, show_referral, start_promo_from_profile
 from handlers.cars import (
-    show_cars, add_car_start, car_make, car_model, car_year,
+    show_cars, add_car_start, car_make, car_model, car_year, car_photo_from_make,
     car_vin, car_vin_photo, car_plate, delete_car_start, delete_car_handler, car_back, car_photo_confirm,
 )
 from handlers.requests import (
@@ -126,10 +126,15 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, order_details),
             ],
             REQUEST_DETAILS: [
+                CallbackQueryHandler(order_create_handler, pattern=r'^order_create:\d+(?::[0-9.]+)?$'),
+                CallbackQueryHandler(cashback_use_handler, pattern=r'^cashback_use:\d+$'),
+                CallbackQueryHandler(order_decline_handler, pattern=r'^order_decline:\d+$'),
+                CallbackQueryHandler(start_customer_reply, pattern=r'^customer_reply:(request|order|general):\d+$'),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, case_details),
             ],
             CAR_MAKE: [
                 MessageHandler(filters.Regex(r'^(?:⬅️\s*)?Назад$'), car_back),
+                MessageHandler(filters.Regex(r'^📷 Сфотографировать СТС / VIN$'), car_photo_from_make),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, car_make),
             ],
             CAR_MODEL: [

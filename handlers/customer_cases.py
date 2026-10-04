@@ -5,7 +5,7 @@ from config import OWNER_ID
 from database.requests import get_requests, get_request, create_request
 from database.orders import get_order_by_request, get_order, cancel_order
 from database.users import get_name, get_phone
-from keyboards.keyboards import main_menu
+from keyboards.keyboards import main_menu, order_confirm_keyboard
 from states import MENU, REQUEST_LIST, REQUEST_DETAILS
 
 
@@ -100,7 +100,20 @@ async def send_case_details(update: Update, request_row, order_row=None):
     text += f'🚗 Автомобиль:\n{vehicle}\n\n'
     text += f'🔧 Что требуется:\n{request_text}'
 
+    inline_keyboard = None
     keyboard = []
+    # Если предложение готово, но заказ ещё не создан, оформление должно быть
+    # доступно прямо из «Мои обращения», а не только из сообщения с предложением.
+    if not order_row and req_status == '💰 Предложение готово':
+        offer_text = __import__('database.requests', fromlist=['get_offer']).get_offer(rid) or ''
+        from database.cashback import get_balance
+        from database.loyalty import parse_amount
+        balance = get_balance(update.effective_user.id)
+        max_cashback = round(min(balance, parse_amount(offer_text) * 0.5), 2)
+        inline_keyboard = order_confirm_keyboard(rid, balance, max_cashback)
+        if offer_text:
+            text += f'\n\n💰 Цена / предложение:\n{offer_text}'
+        text += '\n\nВы можете оформить заказ прямо сейчас.'
     if order_row:
         order_id, _, _, order_status, order_created, _, offer_text = order_row[:7]
         text += f'\n\n🛒 Заказ №{order_id}\n📌 Статус заказа: {order_status}\n📅 Оформлен: {order_created}'
@@ -114,7 +127,7 @@ async def send_case_details(update: Update, request_row, order_row=None):
     keyboard.append(['⬅️ К обращениям'])
     await update.message.reply_text(
         text,
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        reply_markup=inline_keyboard or ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
     )
 
 

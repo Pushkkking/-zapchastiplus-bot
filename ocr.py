@@ -61,6 +61,7 @@ def recognise_vehicle_data(image_bytes: bytes, mime_type: str = "image/jpeg") ->
   "plate": "госномер или пустая строка",
   "make": "марка, если явно видна, иначе пустая строка",
   "model": "модель, если явно видна, иначе пустая строка",
+  "year": "год выпуска, если явно указан на документе/фото, иначе пустая строка",
   "confidence": 0-100,
   "raw_text": "другой полезный текст с фото"
 }
@@ -71,6 +72,9 @@ def recognise_vehicle_data(image_bytes: bytes, mime_type: str = "image/jpeg") ->
 - Если символ сомнителен, лучше оставить поле пустым, чем угадывать.
 - Не путай номер детали, серийный номер или артикул с VIN.
 - Не считай штрихкод VIN, если сам VIN текстом не виден.
+- Если на фото СТС есть поле «Год выпуска» — извлеки именно его.
+- Если на фото виден только VIN без марки/модели/года, не угадывай эти поля по одному VIN.
+- Если марка/модель явно указаны в СТС, извлеки их.
 """.strip()
 
     payload = {
@@ -109,6 +113,7 @@ def recognise_vehicle_data(image_bytes: bytes, mime_type: str = "image/jpeg") ->
         "plate": _normalise_plate(data.get("plate")),
         "make": str(data.get("make") or "").strip(),
         "model": str(data.get("model") or "").strip(),
+        "year": str(data.get("year") or "").strip(),
         "confidence": data.get("confidence", 0),
         "raw_text": str(data.get("raw_text") or "").strip(),
     }
