@@ -478,21 +478,46 @@ async def admin_order_details(update, context):
         notification_ok = True
         try:
             from keyboards.keyboards import customer_reply_keyboard
+            status_messages = {
+                '🆕 Новый': (
+                    'Мы получили ваш заказ и уже начали его обрабатывать.'
+                ),
+                '🔧 В работе': (
+                    'Мы занимаемся вашим заказом и проверяем наличие/возможность поставки.'
+                ),
+                '📦 Готов к выдаче': (
+                    'Ваш заказ готов к выдаче. Если потребуется уточнить детали, напишите нам.'
+                ),
+                '🚗 Выдан': (
+                    'Заказ отмечен как выданный. Спасибо за покупку!'
+                ),
+                '❌ Отменён': (
+                    'Заказ отменён. Если захотите оформить его снова, вы сможете повторить заказ.'
+                ),
+            }
+            explanation = status_messages.get(
+                new_status,
+                'Статус вашего заказа был обновлён.'
+            )
             await context.bot.send_message(
                 chat_id=row[2],
                 text=(
-                    f'🛒 По вашему заказу №{order_id} изменился статус:\n\n'
-                    f'{new_status}\n\n'
-                    'Если хотите что-то уточнить, напишите нам.'
+                    f'🛒 <b>Заказ №{order_id}</b>\n\n'
+                    f'📌 Новый статус: <b>{new_status}</b>\n\n'
+                    f'{explanation}\n\n'
+                    'Статус всегда можно посмотреть в разделе «Мои обращения».'
                 ),
+                parse_mode='HTML',
                 reply_markup=customer_reply_keyboard(order_id=order_id),
             )
             if new_status == '🚗 Выдан':
                 from handlers.customer_review import review_keyboard
                 await context.bot.send_message(
                     chat_id=row[2],
-                    text=(f'⭐ Заказ №{order_id} выдан. Спасибо за покупку!\n\n'
-                          'Оцените, пожалуйста, как всё прошло:'),
+                    text=(
+                        f'⭐ Заказ №{order_id} выдан. Спасибо за покупку!\n\n'
+                        'Оцените, пожалуйста, как всё прошло:'
+                    ),
                     reply_markup=review_keyboard(order_id),
                 )
         except Exception:
