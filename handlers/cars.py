@@ -64,7 +64,7 @@ async def car_photo_from_make(update, context):
     if update.message.text.strip() == '📷 Сфотографировать СТС / VIN':
         await update.message.reply_text(
             '📷 Отправьте фотографию СТС или VIN-таблички.\n\n'
-            'Лучше сфотографировать документ целиком и без бликов. На фото должны быть хорошо видны поля с маркой, моделью, годом, VIN и госномером (если они есть).',
+            'Лучше сфотографировать СТС целиком без бликов. Если текст мелкий, можно сделать фото чуть ближе, чтобы хорошо читались строки «Идентификационный номер (VIN)» и «Кузов (кабина, прицеп) №».',
             reply_markup=ReplyKeyboardMarkup([['⬅️ Назад']], resize_keyboard=True),
         )
         return CAR_VIN
@@ -99,7 +99,8 @@ async def car_vin_photo(update, context):
         logger.exception('Vehicle OCR failed')
         await update.message.reply_text(
             '❌ Не удалось распознать данные на фотографии.\n\n'
-            'Попробуйте сделать более чёткое фото VIN или введите данные вручную.',
+            'Попробуйте сфотографировать VIN крупнее, без бликов и так, чтобы строка VIN занимала заметную часть кадра, или введите данные вручную.\n\n'
+            f'Техническая причина записана в журнал Railway: {type(exc).__name__}.',
             reply_markup=vin_keyboard(),
         )
         return CAR_VIN
@@ -107,6 +108,8 @@ async def car_vin_photo(update, context):
     context.user_data['car_photo_result'] = result
     lines = ['🔎 Результат распознавания:\n']
     lines.append(f"VIN: {result['vin'] or 'не распознан'}")
+    if result.get('vin_candidates') and not result.get('vin'):
+        lines.append('Кандидаты VIN: ' + ', '.join(result['vin_candidates'][:3]))
     lines.append(f"Госномер: {result['plate'] or 'не распознан'}")
     lines.append(f"Год: {result.get('year') or 'не распознан'}")
     if result.get('make'):
@@ -152,7 +155,7 @@ async def car_vin(update,context):
     t=update.message.text.strip().upper()
     if t=='⬅️ Назад': return await show_cars(update,context)
     if t=='📷 СФОТОГРАФИРОВАТЬ СТС / VIN'.upper():
-        await update.message.reply_text('📷 Отправьте фотографию VIN-таблички, VIN под лобовым стеклом или документа, где хорошо виден VIN и госномер.')
+        await update.message.reply_text('📷 Отправьте фотографию VIN-таблички, VIN под лобовым стеклом или СТС. Для СТС лучше, чтобы были видны строки «Идентификационный номер (VIN)» и «Кузов (кабина, прицеп) №».')
         return CAR_VIN
     if t=='Пропустить': t=''
     elif len(t)<3 or len(t)>30 or not all(ch.isalnum() or ch in '-_ ' for ch in t):

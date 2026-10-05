@@ -52,6 +52,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from database.orders import get_user_orders
         from database.cashback import get_order_spent
         customer_id, customer_name, phone, username, card_number = customer
+        from database.users import get_birthday
         customer_birthday = get_birthday(customer_id)
         total = sum(max(0.0, parse_amount(r[6]) - get_order_spent(r[0])) for r in get_user_orders(customer_id) if r[3] == '🚗 Выдан')
         level_name, rate = get_level(total)

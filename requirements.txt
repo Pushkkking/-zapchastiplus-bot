@@ -2,3 +2,5 @@ python-telegram-bot[job-queue]
 qrcode[pil]
 
 python-barcode
+
+Pillow
