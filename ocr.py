@@ -267,6 +267,12 @@ def _call(image_data_urls, api_key, model, structured=True):
 
 
 def recognise_vehicle_data(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
+    """Recognise vehicle data robustly from an STS/VIN photo.
+
+    Important: each image view is sent in a separate request. Sending several
+    large images in one Responses request was unnecessarily fragile and could
+    fail before the model saw the document.
+    """
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY не задан в Railway Variables")
@@ -274,64 +280,136 @@ def recognise_vehicle_data(image_bytes: bytes, mime_type: str = "image/jpeg") ->
     image_urls = _prepare_images(image_bytes, mime_type)
     logger.info("Vehicle OCR: prepared %d image views", len(image_urls))
 
+    models = []
+    configured = os.getenv("OPENAI_VISION_MODEL", "").strip()
+    for model in [configured, "gpt-4o-mini", "gpt-4.1-mini"]:
+        if model and model not in models:
+            models.append(model)
+
     errors = []
-    models = [DEFAULT_MODEL]
-    for fallback in ("gpt-4.1-mini", "gpt-4o-mini"):
-        if fallback not in models:
-            models.append(fallback)
+    results = []
 
-    data = {}
-    for model in models:
+    # First pass: one image per request, structured output.
+    # Start with the full image, then the enlarged STS bands.
+    for view_index, image_url in enumerate(image_urls):
+        for model in models:
+            try:
+                logger.info("Vehicle OCR: view %d/%d, model %s", view_index + 1, len(image_urls), model)
+                data = _call([image_url], api_key, model, structured=True)
+                if data:
+                    results.append(data)
+                    logger.info("Vehicle OCR: successful response, view %d, model %s", view_index + 1, model)
+                    break
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")[:2000]
+                errors.append(f"view {view_index + 1}, {model}: HTTP {exc.code}: {detail}")
+                logger.exception("Vehicle OCR HTTP error: view=%d model=%s", view_index + 1, model)
+            except Exception as exc:
+                errors.append(f"view {view_index + 1}, {model}: {type(exc).__name__}: {exc}")
+                logger.exception("Vehicle OCR error: view=%d model=%s", view_index + 1, model)
+
+        # One good result is enough to proceed to another view only for
+        # corroboration; continue so repeated VIN values can be compared.
+
+    if not results:
+        # Last-resort non-structured call using only the original full image.
         try:
-            logger.info("Vehicle OCR: calling model %s", model)
-            data = _call(image_urls, api_key, model, structured=True)
+            logger.info("Vehicle OCR: trying non-structured fallback on full image")
+            data = _call([image_urls[0]], api_key, models[0], structured=False)
             if data:
-                logger.info("Vehicle OCR: structured response received from %s", model)
-                break
+                results.append(data)
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:1200]
-            errors.append(f"{model}: HTTP {exc.code}: {detail}")
-            logger.exception("Vehicle OCR HTTP error from %s", model)
-        except Exception as exc:
-            errors.append(f"{model}: {type(exc).__name__}: {exc}")
-            logger.exception("Vehicle OCR error from %s", model)
-
-    if not data:
-        try:
-            logger.info("Vehicle OCR: trying JSON-mode fallback")
-            data = _call(image_urls, api_key, DEFAULT_MODEL, structured=False)
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:1200]
+            detail = exc.read().decode("utf-8", errors="replace")[:2000]
             errors.append(f"fallback: HTTP {exc.code}: {detail}")
             logger.exception("Vehicle OCR fallback HTTP error")
         except Exception as exc:
             errors.append(f"fallback: {type(exc).__name__}: {exc}")
             logger.exception("Vehicle OCR fallback error")
 
-    if not data:
-        raise RuntimeError("; ".join(errors) or "Пустой ответ OCR API")
+    if not results:
+        # Keep the real API reason in Railway logs; don't expose the API key or
+        # giant response body to the client.
+        reason = " | ".join(errors[-3:])
+        raise RuntimeError(reason or "Пустой ответ OCR API")
 
-    candidates = _vin_candidates(data)
-    vin = next((_normalise_vin(v) for v in candidates if _normalise_vin(v)), "")
+    # Merge the best information from all successful views.
+    merged = {
+        "vin": "",
+        "vin_candidates": [],
+        "plate": "",
+        "plate_candidates": [],
+        "make": "",
+        "model": "",
+        "year": "",
+        "confidence": 0,
+        "raw_text": "",
+    }
 
-    # If the model returned the same VIN twice, increase confidence: this is
-    # particularly useful for STS where VIN is repeated in the кузов field.
-    normalized = [_normalise_vin(v) for v in candidates]
-    duplicates = [v for v in set(normalized) if v]
-    confidence = max(0, min(100, float(data.get("confidence") or 0)))
-    if vin and sum(1 for v in normalized if v == vin) >= 2:
-        confidence = max(confidence, 98.0)
+    def add_unique(key, value, limit=10):
+        if value and value not in merged[key]:
+            merged[key].append(value)
+            del merged[key][limit:]
+
+    for item in results:
+        if not merged["make"] and item.get("make"):
+            merged["make"] = str(item["make"]).strip()
+        if not merged["model"] and item.get("model"):
+            merged["model"] = str(item["model"]).strip()
+        if not merged["year"] and item.get("year"):
+            merged["year"] = str(item["year"]).strip()
+        merged["confidence"] = max(merged["confidence"], float(item.get("confidence") or 0))
+        if item.get("raw_text"):
+            merged["raw_text"] += ("\n" if merged["raw_text"] else "") + str(item["raw_text"])
+        add_unique("plate", str(item.get("plate") or "").strip())
+        for plate in item.get("plate_candidates") or []:
+            add_unique("plate_candidates", str(plate).strip())
+
+        if item.get("vin"):
+            add_unique("vin_candidates", item.get("vin"))
+        for candidate in item.get("vin_candidates") or []:
+            add_unique("vin_candidates", candidate)
+
+    # Extract additional VIN candidates from merged OCR text.
+    extracted = _vin_candidates(merged)
+    for candidate in extracted:
+        add_unique("vin_candidates", candidate)
+
+    valid = []
+    for candidate in merged["vin_candidates"]:
+        vin = _normalise_vin(candidate)
+        if vin and vin not in valid:
+            valid.append(vin)
+
+    # Prefer a VIN corroborated by multiple independent views.
+    occurrences = {}
+    for item in results:
+        local = []
+        for value in [item.get("vin"), *(item.get("vin_candidates") or [])]:
+            vin = _normalise_vin(value)
+            if vin:
+                local.append(vin)
+        for vin in set(local):
+            occurrences[vin] = occurrences.get(vin, 0) + 1
+
+    if valid:
+        valid.sort(key=lambda v: (-occurrences.get(v, 0), valid.index(v)))
+        vin = valid[0]
+    else:
+        vin = ""
+
+    if vin and occurrences.get(vin, 0) >= 2:
+        merged["confidence"] = max(merged["confidence"], 98.0)
+    elif vin:
+        merged["confidence"] = max(merged["confidence"], 85.0)
 
     return {
         "vin": vin,
-        "vin_candidates": candidates[:5],
-        "plate": _normalise_plate(
-            data.get("plate") or
-            ((data.get("plate_candidates") or [""])[0] if data.get("plate_candidates") else "")
-        ),
-        "make": str(data.get("make") or "").strip(),
-        "model": str(data.get("model") or "").strip(),
-        "year": _normalise_year(data.get("year")),
-        "confidence": confidence,
-        "raw_text": str(data.get("raw_text") or "").strip(),
+        "vin_candidates": valid[:5],
+        "plate": _normalise_plate(merged["plate"] or (merged["plate_candidates"][0] if merged["plate_candidates"] else "")),
+        "make": merged["make"],
+        "model": merged["model"],
+        "year": _normalise_year(merged["year"]),
+        "confidence": max(0, min(100, round(merged["confidence"], 1))),
+        "raw_text": merged["raw_text"].strip(),
     }
+
