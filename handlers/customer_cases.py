@@ -32,10 +32,21 @@ async def show_cases(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order = get_order_by_request(row[0], update.effective_user.id)
         items.append((row, order))
 
+    # Не пытаемся разбирать кнопку по «№1»: номера заявок и заказов ведутся
+    # раздельно и могут совпадать. Храним точное соответствие текста кнопки объекту.
+    button_map = {}
+    keyboard = []
+    for request_row, order_row in items:
+        title = _case_title(request_row, order_row)
+        # Telegram-клавиатура допускает одинаковый текст, но для пользователя
+        # лучше всё равно сделать уникальный ключ в памяти.
+        button_map[title] = (request_row[0], order_row[0] if order_row else None)
+        keyboard.append([title])
+
+    context.user_data['case_button_map'] = button_map
     context.user_data['case_request_ids'] = [r[0] for r, _ in items]
     context.user_data['case_order_ids'] = [o[0] for _, o in items if o]
 
-    keyboard = [[_case_title(r, o)] for r, o in items]
     keyboard.append(['⬅️ Назад'])
     await update.message.reply_text(
         '📋 Мои обращения\n\n'
@@ -52,32 +63,26 @@ async def case_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text('Главное меню:', reply_markup=main_menu())
         return MENU
 
-    try:
-        number = int(text.split('№', 1)[1].split(' ', 1)[0])
-    except (ValueError, IndexError):
+    mapped = context.user_data.get('case_button_map', {}).get(text)
+    if not mapped:
         return REQUEST_LIST
 
-    # Сначала считаем номер либо номером заказа, либо номером заявки.
-    request_ids = context.user_data.get('case_request_ids', [])
-    order_ids = context.user_data.get('case_order_ids', [])
-    if number in request_ids:
-        row = get_request(number, update.effective_user.id)
-        if row:
-            order = get_order_by_request(number, update.effective_user.id)
-            context.user_data['case_request_id'] = number
-            context.user_data['case_order_id'] = order[0] if order else None
-            await send_case_details(update, row, order)
-            return REQUEST_DETAILS
-    if number in order_ids:
-        order = get_order(number)
-        if order and order[2] == update.effective_user.id:
-            row = get_request(order[1], update.effective_user.id)
-            context.user_data['case_request_id'] = order[1]
-            context.user_data['case_order_id'] = order[0]
-            await send_case_details(update, row, order)
-            return REQUEST_DETAILS
+    request_id, order_id = mapped
+    row = get_request(request_id, update.effective_user.id)
+    if not row:
+        await update.message.reply_text('Обращение не найдено.')
+        return REQUEST_LIST
 
-    return REQUEST_LIST
+    order = None
+    if order_id:
+        order = get_order(order_id)
+        if not order or order[2] != update.effective_user.id:
+            order = None
+
+    context.user_data['case_request_id'] = request_id
+    context.user_data['case_order_id'] = order[0] if order else None
+    await send_case_details(update, row, order)
+    return REQUEST_DETAILS
 
 
 async def send_case_details(update: Update, request_row, order_row=None):

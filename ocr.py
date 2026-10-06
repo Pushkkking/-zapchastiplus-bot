@@ -1,415 +1,359 @@
-"""Vehicle/VIN OCR tuned for Russian vehicle registration certificates (STS) and VIN photos."""
-import base64
+"""Local vehicle OCR for the Telegram bot.
+
+Uses PaddleOCR locally on Railway. No OpenAI/DeepSeek API is used.
+Extracts VIN, Russian plate and vehicle year from a photo of an STS/VIN plate.
+"""
+from __future__ import annotations
+
 import io
-import json
 import logging
 import os
 import re
-import urllib.error
-import urllib.request
+import threading
+from collections import Counter
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
-OPENAI_API_URL = "https://api.openai.com/v1/responses"
-DEFAULT_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4.1-mini")
 logger = logging.getLogger(__name__)
 
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "vin": {"type": "string"},
-        "vin_candidates": {"type": "array", "items": {"type": "string"}},
-        "plate": {"type": "string"},
-        "plate_candidates": {"type": "array", "items": {"type": "string"}},
-        "make": {"type": "string"},
-        "model": {"type": "string"},
-        "year": {"type": "string"},
-        "confidence": {"type": "number"},
-        "raw_text": {"type": "string"},
-    },
-    "required": [
-        "vin", "vin_candidates", "plate", "plate_candidates",
-        "make", "model", "year", "confidence", "raw_text"
-    ],
-    "additionalProperties": False,
-}
+# Keep PaddleX/PaddleOCR model cache on the Railway Volume so models survive restarts.
+if os.path.isdir("/data"):
+    os.environ.setdefault("PADDLE_PDX_CACHE_HOME", "/data/.paddlex")
 
-VIN_RE = re.compile(r"(?<![A-Z0-9])[A-HJ-NPR-Z0-9]{17}(?![A-Z0-9])")
-VIN_LABEL_RE = re.compile(r"(?:Идентификационный\s+номер|VIN|номер\s+кузова|кузов|рама)", re.I)
+VIN_STRICT_RE = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
+VIN_LABEL_RE = re.compile(r"(?:идентификационн|VIN|номер\s+кузова|кузов|рама)", re.I)
+YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
+
+# Russian registration plates: one Cyrillic letter + 3 digits + 2 Cyrillic letters + region.
+PLATE_RE = re.compile(
+    r"(?<![А-ЯA-Z0-9])([АВЕКМНОРСТУХABEKMHOPCTYX]\s*\d{3}\s*[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\s*\d{2,3})(?![А-ЯA-Z0-9])",
+    re.I,
+)
+
+CYR_TO_LATIN = str.maketrans({
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H",
+    "О": "O", "Р": "P", "С": "C", "Т": "T", "Х": "X", "У": "Y",
+})
+
+# Only letters that are legal in a Russian plate and have a Latin look-alike.
+PLATE_ALLOWED = set("АВЕКМНОРСТУХ")
+
+# OCR frequently confuses these glyphs in VINs. We only use corrections after
+# a candidate is already 17 characters long and is close to a valid VIN.
+VIN_REPAIR = str.maketrans({
+    "О": "0", "О": "0", "І": "1", "I": "1", "Q": "0",
+})
+
+_PROMPTLESS = True
+_OCR = None
+_OCR_LOCK = threading.Lock()
 
 
-def _extract_json(text: str) -> dict:
-    text = (text or "").strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, flags=re.S)
-        if match:
+def _get_ocr():
+    global _OCR
+    if _OCR is not None:
+        return _OCR
+    with _OCR_LOCK:
+        if _OCR is not None:
+            return _OCR
+        try:
+            from paddleocr import PaddleOCR
+        except Exception as exc:
+            raise RuntimeError(
+                "PaddleOCR не установлен. Проверьте зависимости Railway."
+            ) from exc
+
+        logger.info("Initialising local PaddleOCR (Russian, CPU)")
+        _OCR = PaddleOCR(
+            lang="ru",
+            text_detection_model_name="PP-OCRv5_mobile_det",
+            text_recognition_model_name="eslav_PP-OCRv5_mobile_rec",
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            engine="paddle",
+        )
+        logger.info("Local PaddleOCR initialised")
+    return _OCR
+
+
+def _prepare_images(image_bytes: bytes):
+    image = Image.open(io.BytesIO(image_bytes))
+    image = ImageOps.exif_transpose(image).convert("RGB")
+
+    # Telegram can send very large photos. Keep enough detail for small STS text.
+    max_side = 2600
+    if max(image.size) > max_side:
+        ratio = max_side / max(image.size)
+        image = image.resize(
+            (max(1, int(image.width * ratio)), max(1, int(image.height * ratio))),
+            Image.Resampling.LANCZOS,
+        )
+
+    full = image.copy()
+    enhanced = ImageEnhance.Contrast(full).enhance(1.25)
+    enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.8)
+    enhanced = enhanced.filter(ImageFilter.UnsharpMask(radius=1.2, percent=130, threshold=3))
+
+    w, h = full.size
+    variants = [full, enhanced]
+
+    # STS fields are usually distributed through the page. Two overlapping crops
+    # make small VIN/plate/year lines larger without relying on a cloud model.
+    for top, bottom in ((0.05, 0.62), (0.38, 0.98)):
+        crop = full.crop((0, int(h * top), w, int(h * bottom)))
+        crop = crop.resize((int(crop.width * 1.55), int(crop.height * 1.55)), Image.Resampling.LANCZOS)
+        crop = ImageEnhance.Contrast(crop).enhance(1.30)
+        crop = ImageEnhance.Sharpness(crop).enhance(1.9)
+        crop = crop.filter(ImageFilter.UnsharpMask(radius=1.3, percent=145, threshold=3))
+        variants.append(crop)
+
+    return variants
+
+
+def _result_to_dict(result):
+    """Convert PaddleOCR's result object across 3.x minor versions."""
+    value = result
+    for attr in ("json", "to_dict", "data"):
+        if hasattr(value, attr):
             try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
+                candidate = getattr(value, attr)
+                value = candidate() if callable(candidate) else candidate
+                if isinstance(value, dict):
+                    return value
+            except Exception:
                 pass
+    if isinstance(value, dict):
+        return value
+    try:
+        if hasattr(value, "__dict__"):
+            return value.__dict__
+    except Exception:
+        pass
     return {}
 
 
-def _clean_alnum(value):
-    if not value:
-        return ""
-    value = str(value).upper()
-    # OCR often returns Cyrillic lookalikes from Russian documents.
-    value = value.translate(str.maketrans({
-        "О": "O", "А": "A", "В": "B", "С": "C", "Е": "E",
-        "К": "K", "М": "M", "Н": "H", "Р": "P", "Т": "T",
-        "Х": "X", "У": "Y",
-    }))
+def _collect_texts(obj):
+    """Recursively collect OCR text and confidence from Paddle result objects."""
+    found = []
+
+    def walk(value):
+        if isinstance(value, dict):
+            # Current PaddleOCR 3.x uses rec_texts/rec_scores.
+            texts = value.get("rec_texts")
+            scores = value.get("rec_scores") or []
+            if isinstance(texts, (list, tuple)):
+                for i, text in enumerate(texts):
+                    score = scores[i] if i < len(scores) else 0
+                    if text is not None and str(text).strip():
+                        found.append((str(text).strip(), float(score or 0)))
+                # Do not walk rec_texts again.
+            if "rec_text" in value and value.get("rec_text"):
+                found.append((str(value["rec_text"]).strip(), float(value.get("rec_score") or 0)))
+            if "text" in value and isinstance(value.get("text"), str) and value["text"].strip():
+                found.append((value["text"].strip(), float(value.get("score") or 0)))
+            for k, v in value.items():
+                if k not in {"rec_texts", "rec_scores", "rec_text", "rec_score", "text"}:
+                    walk(v)
+        elif isinstance(value, (list, tuple)):
+            # Legacy-ish shape: [box, [text, score]]
+            if len(value) == 2 and isinstance(value[1], (list, tuple)) and value[1]:
+                if isinstance(value[1][0], str):
+                    try:
+                        score = float(value[1][1]) if len(value[1]) > 1 else 0
+                    except Exception:
+                        score = 0
+                    found.append((value[1][0].strip(), score))
+                    return
+            for item in value:
+                walk(item)
+
+    walk(obj)
+    # Remove exact duplicates while keeping first occurrence.
+    unique = []
+    seen = set()
+    for text, score in found:
+        key = text.strip()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append((key, score))
+    return unique
+
+
+def _ocr_variant(image):
+    import numpy as np
+
+    ocr = _get_ocr()
+    arr = np.asarray(image)
+    results = ocr.predict(arr)
+    texts = []
+    for result in results:
+        texts.extend(_collect_texts(_result_to_dict(result)))
+    return texts
+
+
+def _clean_vin_text(value: str) -> str:
+    value = str(value or "").upper().replace("-", "").replace(" ", "")
+    value = value.translate(CYR_TO_LATIN)
     return re.sub(r"[^A-Z0-9]", "", value)
 
 
-def _normalise_vin(value):
-    value = _clean_alnum(value)
-    if len(value) == 17 and not any(ch in value for ch in "IOQ"):
+def _normalise_vin(value: str) -> str:
+    value = _clean_vin_text(value)
+    if len(value) != 17:
+        return ""
+    if VIN_STRICT_RE.fullmatch(value):
         return value
+    # Conservative OCR correction: only repair characters that are forbidden in
+    # VINs and only when exactly one or two suspicious glyphs are present.
+    repaired = value.translate(VIN_REPAIR)
+    if VIN_STRICT_RE.fullmatch(repaired):
+        return repaired
     return ""
 
 
-def _candidate_from_near_vin_line(line: str):
-    """Extract 17-char VIN from a line even when OCR inserted spaces/hyphens."""
-    cleaned = _clean_alnum(line)
-    # Prefer a 17-char suffix because STS lines often contain a label followed by VIN.
-    if len(cleaned) >= 17:
-        for i in range(0, len(cleaned) - 16):
-            part = cleaned[i:i + 17]
-            if _normalise_vin(part):
-                return part
-    return ""
-
-
-def _vin_candidates(data):
+def _extract_vin_candidates(lines):
     candidates = []
 
     def add(value):
-        cleaned = _clean_alnum(value)
-        if len(cleaned) == 17 and cleaned not in candidates:
-            candidates.append(cleaned)
+        vin = _normalise_vin(value)
+        if vin and vin not in candidates:
+            candidates.append(vin)
 
-    for value in [data.get("vin"), *(data.get("vin_candidates") or [])]:
-        add(value)
+    # First, inspect tokens that already look VIN-like.
+    for text, _score in lines:
+        upper = text.upper().translate(CYR_TO_LATIN)
+        chunks = re.findall(r"[A-Z0-9][A-Z0-9\s\-]{15,25}[A-Z0-9]", upper)
+        for chunk in chunks:
+            add(chunk)
 
-    raw = str(data.get("raw_text") or "")
-    # First search exact 17-char runs.
-    for match in VIN_RE.findall(_clean_alnum(raw)):
-        add(match)
+        # A VIN may be split into several OCR tokens. Remove separators only
+        # from lines that contain mostly Latin/digits.
+        latin_digits = re.sub(r"[^A-Z0-9]", "", upper)
+        if 17 <= len(latin_digits) <= 22 and sum(ch.isdigit() for ch in latin_digits) >= 3:
+            add(latin_digits)
 
-    # Then inspect individual OCR lines around VIN/кузов labels. This catches
-    # values such as "X U F 1 5 6 ..." or values separated by punctuation.
-    lines = raw.splitlines()
-    for idx, line in enumerate(lines):
-        if VIN_LABEL_RE.search(line):
-            for nearby in lines[idx:idx + 3]:
-                add(_candidate_from_near_vin_line(nearby))
+    # Then inspect lines near the explicit VIN/ кузов labels.
+    for idx, (text, _score) in enumerate(lines):
+        if VIN_LABEL_RE.search(text):
+            for near_text, _near_score in lines[idx:idx + 5]:
+                add(near_text)
 
-    # Finally inspect every short-ish line. STS VIN is often printed on its own line.
-    for line in lines:
-        if 15 <= len(_clean_alnum(line)) <= 22:
-            add(_candidate_from_near_vin_line(line))
-
-    return candidates
+    return candidates[:10]
 
 
-def _normalise_plate(value):
-    if not value:
-        return ""
-    return re.sub(r"\s+", " ", str(value).strip().upper())
+def _normalise_plate(value: str) -> str:
+    value = str(value or "").upper()
+    value = re.sub(r"[\s\-]+", "", value)
+    # Convert Latin look-alikes to Cyrillic for a consistent Russian plate display.
+    value = value.translate(str.maketrans({
+        "A": "А", "B": "В", "E": "Е", "K": "К", "M": "М", "H": "Н",
+        "O": "О", "P": "Р", "C": "С", "T": "Т", "X": "Х", "Y": "У",
+    }))
+    return value
 
 
-def _normalise_year(value):
-    if not value:
-        return ""
-    m = re.search(r"\b(19\d{2}|20\d{2}|21\d{2})\b", str(value))
-    return m.group(1) if m else ""
+def _extract_plate_candidates(lines):
+    candidates = []
+    for text, _score in lines:
+        raw = text.upper()
+        # Search both original Cyrillic and visually similar Latin OCR output.
+        for match in PLATE_RE.finditer(raw):
+            plate = _normalise_plate(match.group(1))
+            if plate not in candidates:
+                candidates.append(plate)
+
+        # OCR sometimes drops the final region separator. Try compact chunks.
+        compact = re.sub(r"[^A-ZА-Я0-9]", "", raw)
+        for i in range(max(0, len(compact) - 10)):
+            chunk = compact[i:i + 9]
+            if re.fullmatch(r"[АВЕКМНОРСТУХABEKMHOPCTYX]\d{3}[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\d{2,3}", chunk):
+                plate = _normalise_plate(chunk)
+                if plate not in candidates:
+                    candidates.append(plate)
+    return candidates[:10]
 
 
-def _jpeg_data_url(img, quality=90):
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=quality, optimize=True)
-    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+def _extract_year(lines):
+    # Prefer a year close to an explicit "Год выпуска" label.
+    for idx, (text, _score) in enumerate(lines):
+        if re.search(r"год\s+(выпуска|изготовления)|выпуск", text, re.I):
+            for near_text, _near_score in lines[idx:idx + 3]:
+                m = YEAR_RE.search(near_text)
+                if m:
+                    return m.group(1)
+    # Fallback: use a plausible year, but ignore obvious document years if possible.
+    years = []
+    for text, _score in lines:
+        years.extend(YEAR_RE.findall(text))
+    return years[0] if years else ""
 
 
-def _prepare_images(image_bytes: bytes, mime_type: str):
-    """Create full-frame and overlapping detail crops so small STS VIN text is readable."""
-    try:
-        image = Image.open(io.BytesIO(image_bytes))
-        image = ImageOps.exif_transpose(image).convert("RGB")
-
-        # Do not downscale the user's original too aggressively: VIN characters on
-        # STS can be only a few pixels high. Cap at 2200px on the long side.
-        max_side = 2200
-        if max(image.size) > max_side:
-            ratio = max_side / max(image.size)
-            image = image.resize(
-                (max(1, int(image.width * ratio)), max(1, int(image.height * ratio))),
-                Image.Resampling.LANCZOS,
-            )
-
-        # Full image.
-        full = image.copy()
-
-        # A clean enhanced full image.
-        enhanced = ImageEnhance.Contrast(full).enhance(1.20)
-        enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.6)
-        enhanced = enhanced.filter(ImageFilter.UnsharpMask(radius=1.3, percent=120, threshold=3))
-
-        w, h = full.size
-        # STS layouts commonly place VIN in the upper/middle portion, but we do
-        # overlapping bands rather than hard-coding one exact position.
-        bands = [
-            (0.05, 0.48),
-            (0.27, 0.70),
-            (0.49, 0.92),
-        ]
-        crops = []
-        for top, bottom in bands:
-            crop = full.crop((0, int(h * top), w, int(h * bottom)))
-            # Double the crop so the model receives much larger VIN characters.
-            scale = 1.7 if crop.width < 2000 else 1.35
-            crop = crop.resize(
-                (int(crop.width * scale), int(crop.height * scale)),
-                Image.Resampling.LANCZOS,
-            )
-            crop = ImageEnhance.Contrast(crop).enhance(1.25)
-            crop = ImageEnhance.Sharpness(crop).enhance(1.8)
-            crop = crop.filter(ImageFilter.UnsharpMask(radius=1.4, percent=140, threshold=3))
-            crops.append(crop)
-
-        # Limit to 5 images: full + enhanced + 3 focused bands.
-        return [_jpeg_data_url(full), _jpeg_data_url(enhanced)] + [_jpeg_data_url(c) for c in crops]
-    except Exception:
-        return [f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"]
-
-
-PROMPT = """
-Ты — специалист по OCR автомобильных документов РФ. Перед тобой фотографии одного и того же
-документа/автомобиля. На изображениях могут быть СТС, VIN-табличка или VIN под стеклом.
-
-ТВОЯ ГЛАВНАЯ ЗАДАЧА — ТОЧНО НАЙТИ VIN.
-
-Для российского СТС особенно внимательно ищи:
-1) строку «Идентификационный номер (VIN)»;
-2) строку «Кузов (кабина, прицеп) №» — там VIN/номер кузова часто повторяется;
-3) строку с маркой;
-4) строку с моделью;
-5) строку «Год выпуска ТС»;
-6) строку с государственным регистрационным номером.
-
-VIN обычно содержит РОВНО 17 латинских букв и цифр. В VIN не используются I, O и Q.
-Не путай VIN с серией/номером СТС, номером паспорта ТС, номером документа, номером двигателя
-или регистрационным номером.
-
-КРИТИЧЕСКИ ВАЖНО:
-- Сначала мысленно прочитай текст на всех изображениях.
-- Сравни полный кадр и увеличенные фрагменты.
-- Если VIN повторяется в двух местах документа, сравни оба значения. Совпадающее значение
-  является самым надёжным кандидатом.
-- Даже если dedicated поле vin заполнить трудно, ОБЯЗАТЕЛЬНО добавь все правдоподобные
-  17-символьные варианты в vin_candidates.
-- Если OCR разделил VIN пробелами, собери символы обратно.
-- Не заменяй символы наугад. Если есть сомнение, добавь вариант в vin_candidates и снизь confidence.
-- raw_text должен содержать полезный распознанный текст, особенно строки вокруг VIN.
-- Для госномера используй только то, что реально видно на фото.
-- Если поле не читается, оставь его пустым.
-""".strip()
-
-
-def _call(image_data_urls, api_key, model, structured=True):
-    content = [{"type": "input_text", "text": PROMPT}]
-    for url in image_data_urls:
-        content.append({"type": "input_image", "image_url": url, "detail": "high"})
-
-    payload = {
-        "model": model,
-        "input": [{"role": "user", "content": content}],
-        "store": False,
-    }
-    if structured:
-        payload["text"] = {
-            "format": {
-                "type": "json_schema",
-                "name": "vehicle_data",
-                "strict": True,
-                "schema": SCHEMA,
-            }
-        }
-    else:
-        payload["text"] = {"format": {"type": "json_object"}}
-
-    req = urllib.request.Request(
-        OPENAI_API_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=120) as response:
-        result = json.loads(response.read().decode("utf-8"))
-
-    text = result.get("output_text", "")
-    data = _extract_json(text)
-    if not data:
-        # Defensive fallback for responses where SDK/server does not populate output_text.
-        for item in result.get("output", []) or []:
-            for part in item.get("content", []) or []:
-                if part.get("type") == "output_text":
-                    data = _extract_json(part.get("text", ""))
-                    if data:
-                        break
-            if data:
-                break
-    return data
+def _confidence(vin_candidates, plate_candidates, year, lines):
+    score = 0
+    if vin_candidates:
+        score += 60
+        # Repeated VIN in two or more OCR passes is strong evidence.
+        if len(vin_candidates) >= 1:
+            score += 15
+    if plate_candidates:
+        score += 15
+    if year:
+        score += 10
+    if lines:
+        score += 5
+    return min(score, 99)
 
 
 def recognise_vehicle_data(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
-    """Recognise vehicle data robustly from an STS/VIN photo.
-
-    Important: each image view is sent in a separate request. Sending several
-    large images in one Responses request was unnecessarily fragile and could
-    fail before the model saw the document.
-    """
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY не задан в Railway Variables")
-
-    image_urls = _prepare_images(image_bytes, mime_type)
-    logger.info("Vehicle OCR: prepared %d image views", len(image_urls))
-
-    models = []
-    configured = os.getenv("OPENAI_VISION_MODEL", "").strip()
-    for model in [configured, "gpt-4o-mini", "gpt-4.1-mini"]:
-        if model and model not in models:
-            models.append(model)
-
+    """Run completely local OCR and return VIN, plate and year."""
+    variants = _prepare_images(image_bytes)
+    all_lines = []
     errors = []
-    results = []
 
-    # First pass: one image per request, structured output.
-    # Start with the full image, then the enlarged STS bands.
-    for view_index, image_url in enumerate(image_urls):
-        for model in models:
-            try:
-                logger.info("Vehicle OCR: view %d/%d, model %s", view_index + 1, len(image_urls), model)
-                data = _call([image_url], api_key, model, structured=True)
-                if data:
-                    results.append(data)
-                    logger.info("Vehicle OCR: successful response, view %d, model %s", view_index + 1, model)
-                    break
-            except urllib.error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")[:2000]
-                errors.append(f"view {view_index + 1}, {model}: HTTP {exc.code}: {detail}")
-                logger.exception("Vehicle OCR HTTP error: view=%d model=%s", view_index + 1, model)
-            except Exception as exc:
-                errors.append(f"view {view_index + 1}, {model}: {type(exc).__name__}: {exc}")
-                logger.exception("Vehicle OCR error: view=%d model=%s", view_index + 1, model)
-
-        # One good result is enough to proceed to another view only for
-        # corroboration; continue so repeated VIN values can be compared.
-
-    if not results:
-        # Last-resort non-structured call using only the original full image.
+    for index, image in enumerate(variants, 1):
         try:
-            logger.info("Vehicle OCR: trying non-structured fallback on full image")
-            data = _call([image_urls[0]], api_key, models[0], structured=False)
-            if data:
-                results.append(data)
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:2000]
-            errors.append(f"fallback: HTTP {exc.code}: {detail}")
-            logger.exception("Vehicle OCR fallback HTTP error")
+            logger.info("Vehicle OCR local: view %s/%s", index, len(variants))
+            lines = _ocr_variant(image)
+            all_lines.extend(lines)
+            logger.info("Vehicle OCR local: view %s recognized %s text lines", index, len(lines))
         except Exception as exc:
-            errors.append(f"fallback: {type(exc).__name__}: {exc}")
-            logger.exception("Vehicle OCR fallback error")
+            logger.exception("Vehicle OCR local failed on view %s", index)
+            errors.append(f"view {index}: {type(exc).__name__}: {exc}")
 
-    if not results:
-        # Keep the real API reason in Railway logs; don't expose the API key or
-        # giant response body to the client.
-        reason = " | ".join(errors[-3:])
-        raise RuntimeError(reason or "Пустой ответ OCR API")
+    if not all_lines:
+        raise RuntimeError("Локальный PaddleOCR не вернул текст" + (f" | {' | '.join(errors[-2:])}" if errors else ""))
 
-    # Merge the best information from all successful views.
-    merged = {
-        "vin": "",
-        "vin_candidates": [],
-        "plate": "",
-        "plate_candidates": [],
-        "make": "",
-        "model": "",
-        "year": "",
-        "confidence": 0,
-        "raw_text": "",
-    }
+    vin_candidates = _extract_vin_candidates(all_lines)
+    plate_candidates = _extract_plate_candidates(all_lines)
+    year = _extract_year(all_lines)
 
-    def add_unique(key, value, limit=10):
-        if value and value not in merged[key]:
-            merged[key].append(value)
-            del merged[key][limit:]
-
-    for item in results:
-        if not merged["make"] and item.get("make"):
-            merged["make"] = str(item["make"]).strip()
-        if not merged["model"] and item.get("model"):
-            merged["model"] = str(item["model"]).strip()
-        if not merged["year"] and item.get("year"):
-            merged["year"] = str(item["year"]).strip()
-        merged["confidence"] = max(merged["confidence"], float(item.get("confidence") or 0))
-        if item.get("raw_text"):
-            merged["raw_text"] += ("\n" if merged["raw_text"] else "") + str(item["raw_text"])
-        add_unique("plate", str(item.get("plate") or "").strip())
-        for plate in item.get("plate_candidates") or []:
-            add_unique("plate_candidates", str(plate).strip())
-
-        if item.get("vin"):
-            add_unique("vin_candidates", item.get("vin"))
-        for candidate in item.get("vin_candidates") or []:
-            add_unique("vin_candidates", candidate)
-
-    # Extract additional VIN candidates from merged OCR text.
-    extracted = _vin_candidates(merged)
-    for candidate in extracted:
-        add_unique("vin_candidates", candidate)
-
-    valid = []
-    for candidate in merged["vin_candidates"]:
-        vin = _normalise_vin(candidate)
-        if vin and vin not in valid:
-            valid.append(vin)
-
-    # Prefer a VIN corroborated by multiple independent views.
-    occurrences = {}
-    for item in results:
-        local = []
-        for value in [item.get("vin"), *(item.get("vin_candidates") or [])]:
-            vin = _normalise_vin(value)
-            if vin:
-                local.append(vin)
-        for vin in set(local):
-            occurrences[vin] = occurrences.get(vin, 0) + 1
-
-    if valid:
-        valid.sort(key=lambda v: (-occurrences.get(v, 0), valid.index(v)))
-        vin = valid[0]
+    # Count occurrences across OCR passes. A repeated VIN wins over a one-off candidate.
+    counts = Counter()
+    for text, _score in all_lines:
+        for candidate in _extract_vin_candidates([(text, 0)]):
+            counts[candidate] += 1
+    if counts:
+        vin = counts.most_common(1)[0][0]
+        if counts[vin] >= 2:
+            confidence = 98
+        else:
+            confidence = _confidence(vin_candidates, plate_candidates, year, all_lines)
     else:
         vin = ""
+        confidence = _confidence(vin_candidates, plate_candidates, year, all_lines)
 
-    if vin and occurrences.get(vin, 0) >= 2:
-        merged["confidence"] = max(merged["confidence"], 98.0)
-    elif vin:
-        merged["confidence"] = max(merged["confidence"], 85.0)
+    # Keep useful text for debugging, but do not send it anywhere.
+    raw_text = "\n".join(text for text, _score in all_lines)
 
     return {
         "vin": vin,
-        "vin_candidates": valid[:5],
-        "plate": _normalise_plate(merged["plate"] or (merged["plate_candidates"][0] if merged["plate_candidates"] else "")),
-        "make": merged["make"],
-        "model": merged["model"],
-        "year": _normalise_year(merged["year"]),
-        "confidence": max(0, min(100, round(merged["confidence"], 1))),
-        "raw_text": merged["raw_text"].strip(),
+        "vin_candidates": vin_candidates,
+        "plate": plate_candidates[0] if plate_candidates else "",
+        "plate_candidates": plate_candidates,
+        "make": "",
+        "model": "",
+        "year": year,
+        "confidence": confidence,
+        "raw_text": raw_text[:12000],
     }
-

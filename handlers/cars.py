@@ -1,4 +1,5 @@
 import logging
+import asyncio
 
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
@@ -94,7 +95,7 @@ async def car_vin_photo(update, context):
         photo = update.message.photo[-1]
         tg_file = await context.bot.get_file(photo.file_id)
         image_bytes = bytes(await tg_file.download_as_bytearray())
-        result = recognise_vehicle_data(image_bytes, 'image/jpeg')
+        result = await asyncio.to_thread(recognise_vehicle_data, image_bytes, 'image/jpeg')
     except Exception as exc:
         logger.exception('Vehicle OCR failed')
         await update.message.reply_text(
