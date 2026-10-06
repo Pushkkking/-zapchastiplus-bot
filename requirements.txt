@@ -3,7 +3,8 @@ qrcode[pil]
 python-barcode
 Pillow
 numpy
-# Completely local CPU OCR; no OpenAI/DeepSeek API is required.
+# Local CPU OCR. Versions are pinned together to avoid Paddle/PaddleOCR/PaddleX
+# initialization and runtime incompatibilities.
 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
 paddlepaddle==3.3.1
-paddleocr>=3.7,<3.8
+paddleocr==3.5.0

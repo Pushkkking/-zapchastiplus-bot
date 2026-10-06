@@ -20,6 +20,12 @@ logger = logging.getLogger(__name__)
 if os.path.isdir("/data"):
     os.environ.setdefault("PADDLE_PDX_CACHE_HOME", "/data/.paddlex")
 
+# Railway runs CPU inference. Disable the PIR/oneDNN path that has known
+# compatibility problems with some PaddlePaddle/PaddleOCR combinations.
+# These must be set BEFORE importing paddleocr/paddlex.
+os.environ.setdefault("FLAGS_enable_pir_api", "0")
+os.environ.setdefault("FLAGS_use_mkldnn", "0")
+
 VIN_STRICT_RE = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
 VIN_LABEL_RE = re.compile(r"(?:идентификационн|VIN|номер\s+кузова|кузов|рама)", re.I)
 YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2}|21\d{2})\b")
@@ -60,19 +66,26 @@ def _get_ocr():
             from paddleocr import PaddleOCR
         except Exception as exc:
             raise RuntimeError(
-                "PaddleOCR не установлен. Проверьте зависимости Railway."
+                f"Не удалось импортировать PaddleOCR: {type(exc).__name__}: {exc}"
             ) from exc
 
         logger.info("Initialising local PaddleOCR (Russian, CPU)")
-        _OCR = PaddleOCR(
-            lang="ru",
-            text_detection_model_name="PP-OCRv5_mobile_det",
-            text_recognition_model_name="eslav_PP-OCRv5_mobile_rec",
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
-            engine="paddle",
-        )
+        try:
+            _OCR = PaddleOCR(
+                lang="ru",
+                text_detection_model_name="PP-OCRv5_mobile_det",
+                text_recognition_model_name="eslav_PP-OCRv5_mobile_rec",
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+                engine="paddle",
+                enable_mkldnn=False,
+            )
+        except Exception as exc:
+            logger.exception("Local PaddleOCR initialisation failed")
+            raise RuntimeError(
+                f"Не удалось инициализировать PaddleOCR: {type(exc).__name__}: {exc}"
+            ) from exc
         logger.info("Local PaddleOCR initialised")
     return _OCR
 
